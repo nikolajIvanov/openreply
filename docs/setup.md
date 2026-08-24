@@ -195,6 +195,24 @@ https://your-app.vercel.app/terms
 
 Then publish. Depending on your access level, Meta may let you go live for your own tester accounts immediately, or it may require App Review first (see the last section).
 
+### Publishing is not Advanced Access: every account still needs a role on the app
+
+This one costs an afternoon because the symptom points nowhere near the cause.
+
+A published app still holds **Standard Access** to `instagram_business_basic`, `instagram_business_manage_comments`, and `instagram_business_manage_messages`. Standard Access only covers Instagram accounts that have a role on your app — admins, developers, and Instagram testers. Publishing makes the app live; it does not widen who the permissions apply to. Advanced Access, which covers everyone else, comes only from App Review.
+
+So connecting a second account fails even though the first one works, on the same app, with the same code.
+
+The symptom: Instagram's consent screen appears and the login succeeds, the code exchange at `api.instagram.com/oauth/access_token` returns a normal `IGAA…` token with all the requested permissions — and then every single call against `graph.instagram.com` is refused:
+
+```
+Unsupported request - method type: get  [code=100, type=IGApiException]
+```
+
+`/access_token`, `/refresh_access_token`, `/me` — all of them, identically. Nothing about the message suggests a missing role, and the token itself looks fine.
+
+The fix for your own accounts is the same two-part dance as Step 6, once per account: invite the Instagram username under App roles, Roles, Instagram testers, then accept the invite inside Instagram under Edit profile, Apps and websites, Tester invites. For accounts you do not control, you need App Review — see [META_APP_REVIEW.md](../META_APP_REVIEW.md).
+
 ### The account ID trap (informational)
 
 You do not have to do anything here; OpenReply handles it. It is worth understanding because it is invisible when it goes wrong.
