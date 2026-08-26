@@ -24,6 +24,13 @@ env:
 jobs:
   build-and-push:
     name: Build & push
+    # Opt-in. Without this the job runs on every push to main and fails at the
+    # Docker Hub login for anyone who has not set the two secrets — a red X on
+    # main forever, which buries real CI failures. Secrets cannot be read from
+    # a job-level `if`, so the switch is a repo variable: set DOCKERHUB_ENABLED
+    # to "true" under Settings -> Secrets and variables -> Actions -> Variables
+    # once DOCKERHUB_USERNAME and DOCKERHUB_TOKEN exist.
+    if: ${{ vars.DOCKERHUB_ENABLED == 'true' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
