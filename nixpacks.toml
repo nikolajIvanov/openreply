@@ -1,0 +1,5 @@
+# Dokploy currently builds this service with Nixpacks.
+# Prisma 7 requires Node.js 20.19+ (or 22.12+), so the auto-detected
+# Node 18 runtime must never be used for this application.
+[phases.setup]
+nixPkgs = ["nodejs_22", "npm-10_x", "openssl"]
