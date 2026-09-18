@@ -56,4 +56,4 @@ EXPOSE 3000
 # Default to the web process — the worker service overrides this with
 # `command: ["npm", "run", "worker"]` in whatever compose/stack file deploys
 # it (see openreply-vps.stack.yml in EvolutionAPI/omni-nexus for an example).
-CMD ["npm", "run", "start"]
+CMD ["sh", "-c", "npx prisma migrate deploy && npm run start"]
