@@ -146,8 +146,8 @@ export default async function ReportPage({ params }: ReportPageProps) {
             helper={t("Tracked link visits from replies.")}
           />
           <MetricCard
-            label={t("CTR")}
-            value={`${report.metrics.ctr}%`}
+            label={t("Clicks / 100 sends")}
+            value={`${report.metrics.ctr}`}
             helper={t("Clicks divided by sent replies.")}
           />
         </div>

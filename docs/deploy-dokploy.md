@@ -115,3 +115,90 @@ when most of the comments arrive.
 9. Check `https://your-domain/api/health` — confirms database, Redis, queue, and worker heartbeat are all healthy.
 
 From here, the Meta app setup, OAuth redirect, and webhook configuration are identical to the standard setup in `docs/setup.md`.
+
+## Creator workflow extension (2026-10-03)
+
+This fork adds drafts/archives, a shared deterministic campaign selector,
+priority/exclusion keywords, immutable delivery snapshots, observable stages,
+workspace resource/template copies and read/draft-only service integrations.
+Existing `isActive` rows are backfilled to ACTIVE/PAUSED by additive migration
+`20261003090000_campaign_workspace_extensions`. Historical rows are not paused
+or deleted. Archived campaigns retain their tracking links and shared reports.
+Copies and service-created campaigns start as DRAFT and cannot send.
+
+### Safe release order
+
+1. Check existing active overlaps and pending-next-reel campaigns. Specific-post
+   campaigns now beat global campaigns, then priority, then creation time/id.
+   A retry reserves the original winner before external effects. If a historical
+   account has several active pending campaigns, attachment stops for manual
+   resolution rather than choosing an arbitrary new reel.
+2. Make a fresh database dump; restore it to a separate database and check counts.
+   A configured schedule is not proof of a successful backup. Keep dump checksum,
+   path, restore result and previous release SHA in the operations record.
+3. Temporarily disable worker autodeploy without stopping the running old worker.
+   Push the reviewed source; deploy Web first. The Dockerfile runs
+   `prisma migrate deploy` at runtime, not during the network-isolated build.
+4. Confirm migration success, public health `release` and Dokploy Git SHA. Only
+   then deploy the worker from the same SHA; confirm its heartbeat `release` and
+   new start timestamp. Restore worker autodeploy after success.
+5. Check authenticated campaigns, editor, library and delivery history. A green
+   build/heartbeat is not an Instagram delivery test. Use a designated test post
+   and recipient for a later bounded real send, never random customer comments.
+
+Old application code can be rolled back without removing these additive columns
+and tables. Do not run destructive schema rollback on the live database.
+`CLAIMED` after a crash means potentially delivered: inspect Instagram manually,
+do not auto-resend. Old follow-up jobs without an interaction-window anchor are
+recorded SKIPPED. New follow-ups retain their content and original interaction
+timestamp; outside the known 24-hour window they are skipped.
+
+### Library and integrations
+
+- `/library`: store RESOURCE (description, URL, message, category) or save a
+  TEMPLATE snapshot from an existing campaign. Changes never rewrite copied
+  campaigns or previously sent links. Resource/template lists show latest200.
+- Campaign detail → Verlauf: latest100 delivery stages, latest50 version snapshots
+  and reported conversion counts. Raw link requests may include bot previews and
+  repeats; clicks/100 sends is not a unique-recipient conversion percentage.
+- `/integrations`: an admin creates scoped, revocable service keys with max90-day
+  expiry (UI defaults30 days). Raw token returned only once; store in the client
+  secret store, never in URLs, logs or workflows exported to GitHub.
+- `/api/v1/campaigns`: GET list (latest100), `?id=…` detail, `?id=…&stats` outcomes;
+  POST creates only a DRAFT. Payload includes `instagramAccountId`, `name`, content
+  and stable `idempotencyKey`. Retrying identical input returns the same campaign;
+  reusing the key for changed content returns409. No service key can publish/send.
+- `/api/mcp`: stateless Streamable HTTP with Bearer header, initialize, tools/list,
+  tools/call and notifications. Tools: list_campaigns, get_campaign,
+  get_campaign_stats, create_draft, validate_campaign (completeness only).
+  Tested with the official MCP client. Not an OAuth/dynamic-registration server;
+  use a client supporting custom Authorization headers, not an assumed Claude-Web
+  connector. Origin checked; accept JSON and event-stream; GET stream returns405.
+- `/api/v1/events`: events:read scope, immutable integration rows plus persisted
+  delivery outcomes. Poll `since` ISO timestamp; follow all `nextCursor` pages;
+  only checkpoint after successful processing. Start next poll using returned
+  `nextSince` (15-minute overlap). Dedupe by eventId + status at the consumer.
+  A transaction delayed longer than the overlap requires a wider replay. This is
+  at-least-once, not exactly-once. No arbitrary outbound webhook URL/SSRF sink.
+- `/api/v1/conversions`: conversions:write scope; POST campaignId, stable externalId,
+  type resource_downloaded/form_completed/qualified_inquiry and optional opaque
+  subjectRef/value. The same event is deduplicated; foreign campaigns return404.
+  Trusted backend credentials only, never embed the key in public landing-page JS.
+  A resource request does not imply a HubSpot deal or an email identity.
+
+Screenshot/text AI drafting can happen in the connected assistant, then call
+create_draft with reviewed facts. Missing URLs stay missing; never invent links.
+No new paid AI provider, autonomous public replies, TikTok integration, A/B split
+or no-click reminders are enabled here. Those require confirmed access and
+recipient-level signals first. Existing reminders are time-based only.
+
+### Verification
+
+Run `npm run db:generate`, `npm run typecheck`, `npm run build`, `npm test`.
+Real PostgreSQL suites use TEST_DATABASE_URL and their own disposable schemas.
+`scripts/verify-extensions.ts` additionally exercises actual session HTTP routes,
+two-workspace isolation, concurrent draft dedupe, input bounds, conversion dedupe,
+key revocation and official MCP initialize/list/call against a local Next server.
+It refuses non-local TEST_DATABASE_URL/TEST_BASE_URL and never calls Meta.
+Check `npm audit --omit=dev` separately from tooling advisories; don't downgrade
+Next/Prisma across major versions just because `npm audit fix --force` suggests it.

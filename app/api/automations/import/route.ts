@@ -4,6 +4,8 @@ import { prisma } from "@/lib/db/client";
 import { getWorkspaceInstagramAccount } from "@/lib/instagram-accounts";
 import { generateReportShareSlug } from "@/lib/reports/share";
 import { generateTrackedLinkSlug } from "@/lib/tracking/server";
+import { saveCampaignRevision } from "@/lib/campaigns/mutations";
+import { httpUrl } from "@/lib/library/schema";
 import {
   canManageWorkspace,
   getCurrentWorkspaceContext,
@@ -80,7 +82,7 @@ export async function POST(request: NextRequest) {
     }
 
     const validTrackedUrl =
-      campaign.trackedUrl && /^https?:\/\//i.test(campaign.trackedUrl)
+      campaign.trackedUrl && httpUrl.safeParse(campaign.trackedUrl).success
         ? campaign.trackedUrl
         : null;
     const name =
@@ -88,7 +90,8 @@ export async function POST(request: NextRequest) {
       `Imported: ${campaign.keywords[0]}`;
     const publicReply = (campaign.publicReplyMessage ?? "").trim();
 
-    await prisma.automation.create({
+    await prisma.$transaction(async (tx) => {
+    const imported = await tx.automation.create({
       data: {
         name,
         goal: (campaign.goal ?? "").trim().slice(0, 120) || null,
@@ -99,6 +102,7 @@ export async function POST(request: NextRequest) {
         publicReplyEnabled: Boolean(publicReply),
         publicReplyMessage: publicReply ? publicReply.slice(0, 1000) : null,
         isActive: campaign.isActive,
+        lifecycle: campaign.isActive ? "ACTIVE" : "PAUSED",
         wholeWordMatch: campaign.wholeWordMatch,
         workspaceId: context.workspaceId,
         instagramAccountId: account.id,
@@ -116,6 +120,8 @@ export async function POST(request: NextRequest) {
             }
           : {}),
       },
+    });
+    await saveCampaignRevision(tx, imported, context.userId);
     });
 
     usedPostIds.add(campaign.postId);

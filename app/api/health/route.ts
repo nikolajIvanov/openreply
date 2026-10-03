@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db/client";
 import { getDMQueue, getRedisConnection } from "@/lib/queue/client";
 import { getWorkerHealth } from "@/lib/ops/worker-health";
+import { OPENREPLY_RELEASE } from "@/lib/release";
 
 export const runtime = "nodejs";
 // Health must reflect live state (worker heartbeat, queue depth), never a
@@ -102,6 +103,7 @@ export async function GET() {
   return NextResponse.json(
     {
       status: healthy ? "ok" : "degraded",
+      release: OPENREPLY_RELEASE,
       checks: {
         database,
         redis,

@@ -23,9 +23,9 @@ function getCount(value: StatusCountRow["_count"] | KeywordCountRow["_count"]) {
 
 export function calculateCtr(clicks: number, sent: number) {
   if (sent <= 0) return 0;
-  // Raw clicks can exceed sends (repeat clicks, link-preview bots hitting the
-  // tracked URL), which makes a "rate" over 100% — cap it so CTR stays sane.
-  return Math.min(100, Number(((clicks / sent) * 100).toFixed(1)));
+  // Compatibility field name: this is raw clicks per 100 confirmed sends,
+  // NOT recipient CTR. Repeat clicks and previews legitimately exceed 100.
+  return Number(((Math.max(0, clicks) / sent) * 100).toFixed(1));
 }
 
 export function summarizeDmStatuses(rows: StatusCountRow[]) {

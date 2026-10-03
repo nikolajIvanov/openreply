@@ -10,6 +10,7 @@ export interface WorkerHeartbeat {
   pid: number;
   hostname?: string;
   startedAt?: string;
+  release?: string;
   checkedAt: string;
 }
 

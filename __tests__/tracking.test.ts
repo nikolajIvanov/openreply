@@ -95,6 +95,7 @@ describe("campaign analytics helpers", () => {
     expect(calculateCtr(5, 20)).toBe(25);
     expect(calculateCtr(2, 3)).toBe(66.7);
     expect(calculateCtr(5, 0)).toBe(0);
+    expect(calculateCtr(12, 4)).toBe(300);
   });
 
   it("normalizes top keywords by count", () => {

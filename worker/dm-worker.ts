@@ -2,7 +2,9 @@ import { createDMWorker } from "@/lib/queue/dm-worker";
 import { recordWorkerHeartbeat } from "@/lib/ops/worker-health";
 import { reconcileComments } from "@/lib/polling/comment-reconciler";
 import { attachPendingNextReels } from "@/lib/automation/attach-next-reel";
+import { recoverPendingFollowUps } from "@/lib/queue/follow-up-delivery";
 import os from "node:os";
+import { OPENREPLY_RELEASE } from "@/lib/release";
 
 const worker = createDMWorker();
 const startedAt = new Date().toISOString();
@@ -13,7 +15,7 @@ const POLL_INTERVAL_MS = Number(
   process.env.COMMENT_POLL_INTERVAL_MS ?? 5 * 60_000
 );
 
-console.log("[DM Worker] Started");
+console.log("[DM Worker] Started", OPENREPLY_RELEASE);
 
 async function heartbeat() {
   try {
@@ -21,7 +23,9 @@ async function heartbeat() {
       pid: process.pid,
       hostname: os.hostname(),
       startedAt,
+      release: OPENREPLY_RELEASE,
     });
+    await recoverPendingFollowUps();
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown error";
     console.error("[DM Worker] Heartbeat failed:", message);
@@ -33,6 +37,7 @@ const heartbeatTimer = setInterval(() => void heartbeat(), HEARTBEAT_INTERVAL_MS
 
 async function poll() {
   try {
+    await recoverPendingFollowUps();
     const attached = await attachPendingNextReels();
     if (attached.bound > 0 || attached.failedAccounts > 0) {
       console.log("[DM Worker] Next-reel attachment:", attached);

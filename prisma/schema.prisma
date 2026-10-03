@@ -85,6 +85,11 @@ model Workspace {
   linkClicks        LinkClick[]
   webhookEvents     WebhookEvent[]
   operationalEvents OperationalEvent[]
+  assets            WorkspaceAsset[]
+  serviceKeys       ServiceKey[]
+  integrationEvents IntegrationEvent[]
+  revisions         CampaignRevision[]
+  deliveryEvents    DeliveryEvent[]
 
   @@index([ownerId])
 }
@@ -202,6 +207,12 @@ model Automation {
   publicReplyMessage String?
   publicReplyMessages String[] @default([])
   isActive       Boolean @default(true)
+  // isActive remains the compatibility gate for older worker code.
+  lifecycle      String @default("ACTIVE")
+  priority       Int @default(0)
+  excludedKeywords String[] @default([])
+  armedAt        DateTime?
+  version        Int @default(1)
   wholeWordMatch Boolean @default(true)
   reportShareSlug    String? @unique
   reportShareEnabled Boolean @default(true)
@@ -214,10 +225,87 @@ model Automation {
   dmLogs           DmLog[]
   trackedLinks     TrackedLink[]
   linkClicks       LinkClick[]
+  deliveryEvents   DeliveryEvent[]
 
   @@index([workspaceId])
   @@index([instagramAccountId])
   @@index([postId])
+}
+
+model WorkspaceAsset {
+  id          String @id @default(cuid())
+  workspaceId String
+  name        String
+  kind        String
+  data        Json
+  version     Int @default(1)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  @@index([workspaceId, kind])
+}
+
+model ServiceKey {
+  id          String @id @default(cuid())
+  workspaceId String
+  name        String
+  tokenHash   String @unique
+  scopes      String[]
+  expiresAt   DateTime
+  revokedAt   DateTime?
+  createdAt   DateTime @default(now())
+  lastUsedAt  DateTime?
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  @@index([workspaceId])
+}
+
+model IntegrationEvent {
+  id           String @id @default(cuid())
+  workspaceId  String
+  automationId String?
+  eventType    String
+  externalId   String?
+  payload      Json
+  createdAt    DateTime @default(now())
+  workspace    Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  @@unique([workspaceId, externalId])
+  @@index([workspaceId, createdAt])
+}
+
+model CampaignRevision {
+  id           String @id @default(cuid())
+  workspaceId  String
+  automationId String
+  actorId      String?
+  snapshot     Json
+  createdAt    DateTime @default(now())
+  workspace    Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  @@index([workspaceId, automationId, createdAt])
+}
+
+model DeliveryEvent {
+  id           String @id @default(cuid())
+  workspaceId  String
+  automationId String
+  instagramAccountId String?
+  stage        String
+  operationKey String @unique
+  status       String @default("PENDING")
+  recipientId  String?
+  message      String?
+  campaignVersion Int @default(1)
+  payload      Json?
+  attempts     Int @default(0)
+  scheduledAt  DateTime?
+  claimedAt    DateTime?
+  sentAt       DateTime?
+  error        String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  workspace    Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  automation   Automation @relation(fields: [automationId], references: [id], onDelete: Cascade)
+  @@index([workspaceId, createdAt])
+  @@index([automationId, stage])
 }
 
 model DmLog {
