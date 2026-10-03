@@ -52,7 +52,9 @@ export async function selectTriggerWinner<T extends CampaignRule & {
       stage: "TRIGGER", status: "SELECTED", campaignVersion: chosen.version ?? 1,
       message: "", payload: { snapshot: JSON.parse(JSON.stringify(snapshot)) },
     },
-    update: {},
+    // A non-empty no-content-change update permits a native PostgreSQL upsert
+    // instead of Prisma's read/create race under parallel webhook jobs.
+    update: { operationKey },
     select: { automationId: true, payload: true },
   });
   // Never fall through to another campaign if the frozen winner is now

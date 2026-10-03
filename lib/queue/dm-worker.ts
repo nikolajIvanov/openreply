@@ -437,7 +437,7 @@ async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
         matchedKeyword: matchResult.matchedKeyword,
         status: "PENDING",
       },
-      update: {},
+      update: { commentId },
     });
 
     // Public reply leg — decoupled from the DM and posted first so a DM failure
@@ -836,7 +836,11 @@ async function sendPostbackOnce({
           workspaceId: automation.workspaceId, automationId: automation.id,
           instagramAccountId: automation.instagramAccountId, campaignVersion: automation.version,
           recipientId, message, attempts: 1 },
-        update: { status: "CLAIMED", claimedAt: new Date(), attempts: { increment: 1 } },
+        // A confirmed rejection permits a fresh attempt with today's content.
+        // Keep its version and message consistent; successful/uncertain claims
+        // remain protected by PostbackDelivery and cannot reach this update.
+        update: { status: "CLAIMED", claimedAt: new Date(), attempts: { increment: 1 },
+          campaignVersion: automation.version, recipientId, message },
       });
     });
   } catch (error) {
@@ -1443,12 +1447,15 @@ async function processMessage(job: Job<ProcessMessageJob>): Promise<void> {
       continue;
     }
 
-    await prisma.dmLog.upsert({
-      where: { automationId_commentId: { automationId: automation.id, commentId: dedupeId } },
-      create: { ...logBase, commenterName, status: "PENDING" }, update: {},
-    });
     let claimed;
     try {
+      await prisma.dmLog.upsert({
+        where: { automationId_commentId: { automationId: automation.id, commentId: dedupeId } },
+        create: { ...logBase, commenterName, status: "PENDING" },
+        // Non-empty no-content-change update avoids an emulated read/create
+        // upsert race when parallel jobs see the same inbound message.
+        update: { commentId: dedupeId },
+      });
       claimed = await claimCommentDelivery(automation.id, dedupeId, "dm", {
         workspaceId: automation.workspaceId, instagramAccountId: automation.instagramAccountId,
         version: automation.version, stage: sendFollowPrompt ? "FOLLOW_PROMPT" : "REVEAL",

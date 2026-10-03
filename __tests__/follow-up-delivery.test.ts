@@ -104,4 +104,10 @@ describe("durable immutable follow-up delivery", () => {
     await expect(deliverFollowUp(data, "job")).rejects.toThrow("DB down");
     expect(mocks.send).not.toHaveBeenCalled();
   });
+  it("rejects a job whose connection differs from the frozen account", async () => {
+    await prepare();
+    await deliverFollowUp({ ...data, accountConnectionId: "other-connection" }, "job");
+    expect(stored.status).toBe("SKIPPED");
+    expect(mocks.send).not.toHaveBeenCalled();
+  });
 });

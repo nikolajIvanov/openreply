@@ -1021,6 +1021,13 @@ describe("DM Worker — DM keyword trigger", () => {
     mockPrisma.automation.findMany.mockResolvedValue([dmTriggerAutomation]);
   });
 
+  it("releases quota when persisting the pre-send log fails", async () => {
+    mockPrisma.dmLog.upsert.mockRejectedValueOnce(new Error("Pre-send database failure"));
+    await expect(getProcessor()(createMockMessageJob())).rejects.toThrow("Pre-send database failure");
+    expect(mockReleaseWorkspaceDMReservation).toHaveBeenCalledWith("workspace_123", usagePeriodStart);
+    expect(mockSendDirectMessage).not.toHaveBeenCalled();
+  });
+
   it("should reply to a DM whose text matches the campaign keywords", async () => {
     const processor = getProcessor();
     await processor(createMockMessageJob());
@@ -1670,6 +1677,14 @@ describe("DM Worker — follow re-check acknowledgement", () => {
 describe("ambiguous Meta sends and durable comment claims", () => {
   const withLinks = { ...mockAutomation, trackedLinks: [{ slug: "resource", label: null, destinationUrl: "https://example.com" }] };
 
+  it("uses a non-empty no-content-change update for the pre-send comment log", async () => {
+    await getProcessor()(createMockJob());
+    expect(mockPrisma.dmLog.upsert).toHaveBeenCalledWith(expect.objectContaining({
+      where: { automationId_commentId: { automationId: mockAutomation.id, commentId: mockJobData.commentId } },
+      create: expect.objectContaining({ status: "PENDING" }), update: { commentId: mockJobData.commentId },
+    }));
+  });
+
   it("never falls back or retries Meta code 1, even though Meta may have sent the message", async () => {
     mockPrisma.automation.findMany.mockResolvedValue([withLinks]);
     mockSendPrivateReplyWithLinkButton.mockRejectedValue(new MetaApiError(1, undefined, undefined, "An unknown error has occurred."));
@@ -1750,6 +1765,35 @@ it("deduplicates a redelivered Meta button tap after queue retention expires", a
   await process(createMockPostbackJob(data));
   await process({ ...createMockPostbackJob(data), id: "redelivered-after-eviction" });
   expect(mockSendDirectMessage).toHaveBeenCalledTimes(1);
+});
+
+it("keeps the postback attempt message and version consistent after a confirmed rejection and campaign edit", async () => {
+  const claims = new Set<string>();
+  const events = new Map<string, Record<string, unknown>>();
+  mockPrisma.postbackDelivery.create.mockImplementation(async ({ data }: { data: { id: string } }) => {
+    if (claims.has(data.id)) throw { code: "P2002" };
+    claims.add(data.id); return data;
+  });
+  mockPrisma.postbackDelivery.delete.mockImplementation(async ({ where }: { where: { id: string } }) => claims.delete(where.id));
+  mockPrisma.deliveryEvent.upsert.mockImplementation(async (args: {
+    where: { operationKey: string }; create: Record<string, unknown>; update: Record<string, unknown>;
+  }) => {
+    const previous = events.get(args.where.operationKey);
+    const next = previous ? { ...previous, ...args.update } : { id: args.where.operationKey, ...args.create };
+    events.set(args.where.operationKey, next); return next;
+  });
+  const data = { instagramAccountId: "ig_456", userId: "commenter_999", payload: "reveal:auto_789", mid: "retry-same-tap" };
+  mockPrisma.automation.findFirst.mockResolvedValue({ ...mockAutomation, version: 1, dmMessage: "First message" });
+  mockSendDirectMessage.mockRejectedValueOnce(new MetaApiError(10, undefined, undefined, "Confirmed rejection"));
+  const process = getProcessor();
+  await expect(process(createMockPostbackJob(data))).rejects.toThrow("Confirmed rejection");
+  expect([...events.values()][0]).toMatchObject({ status: "FAILED", campaignVersion: 1, message: "First message" });
+  mockPrisma.automation.findFirst.mockResolvedValue({ ...mockAutomation, version: 2, dmMessage: "Second message" });
+  await process(createMockPostbackJob(data));
+  expect(mockSendDirectMessage).toHaveBeenLastCalledWith("decrypted_token", "ig_456", "commenter_999", "Second message");
+  expect([...events.values()][0]).toMatchObject({ status: "SENT", campaignVersion: 2, message: "Second message" });
+  await process({ ...createMockPostbackJob(data), id: "redelivery-after-success" });
+  expect(mockSendDirectMessage).toHaveBeenCalledTimes(2);
 });
 
 it("retains the public reply claim if sending succeeded but its log write failed", async () => {

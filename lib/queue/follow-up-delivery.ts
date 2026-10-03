@@ -26,7 +26,7 @@ export async function scheduleFollowUp(campaign: FollowUpCampaign, input: {
   const scheduledAt = new Date((validAnchor ? anchor : Date.now()) + Math.max(0, campaign.followUpDelayMinutes) * 60_000);
   const expiresAt = new Date((validAnchor ? anchor : 0) + 24 * 60 * 60_000);
   const event = await (transaction ?? prisma).deliveryEvent.upsert({
-    where: { operationKey }, update: {},
+    where: { operationKey }, update: { operationKey },
     create: {
       workspaceId: campaign.workspaceId, automationId: campaign.id,
       instagramAccountId: campaign.instagramAccountId,
@@ -66,7 +66,7 @@ export async function deliverFollowUp(data: ProcessFollowUpJob, jobId: string) {
   if (!data.deliveryEventId) {
     // Old queue entries have neither a snapshot nor an opt-in/window anchor.
     if (automation) await prisma.deliveryEvent.upsert({
-      where: { operationKey: `legacy_followup_${jobId}` }, update: {},
+      where: { operationKey: `legacy_followup_${jobId}` }, update: { operationKey: `legacy_followup_${jobId}` },
       create: { workspaceId: automation.workspaceId, automationId: automation.id,
         stage: "FOLLOW_UP", status: "SKIPPED", operationKey: `legacy_followup_${jobId}`,
         campaignVersion: automation.version, error: "Legacy job has no immutable snapshot or known interaction window" },
@@ -83,6 +83,7 @@ export async function deliverFollowUp(data: ProcessFollowUpJob, jobId: string) {
     await skip("Campaign paused, archived, removed or follow-up disabled"); return;
   }
   if (automation.instagramAccountId !== event.instagramAccountId ||
+    (data.accountConnectionId !== undefined && data.accountConnectionId !== event.instagramAccountId) ||
     automation.instagramAccount.instagramId !== snapshot?.instagramId ||
     data.instagramAccountId !== snapshot?.instagramId ||
     data.userId !== event.recipientId || !event.message) {
