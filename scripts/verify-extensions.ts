@@ -36,6 +36,7 @@ async function main() {
     const pageResponse = await session("/integrations");
     assert.equal(pageResponse.status, 200);
     const pageHtml = await pageResponse.text();
+    assert.ok(pageHtml.includes("update_draft")); assert.ok(pageHtml.includes("expectedVersion"));
     for (const days of [30, 60, 90]) assert.ok(pageHtml.includes(`value="${days}"`));
     assert.match(pageHtml, /<option[^>]*value="30"[^>]*selected=""/);
     const keyResponse = await session("/api/integrations/keys", { name: "local acceptance", scopes: ["campaigns:read", "drafts:write", "events:read", "conversions:write"] });
@@ -58,7 +59,7 @@ async function main() {
     assert.ok(!JSON.stringify(keyList).includes(token)); assert.ok(!JSON.stringify(keyList).includes("tokenHash"));
     const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
     const draft = { instagramAccountId: first.account.id, name: "Acceptance draft", dmMessage: "Hello {username}, {link}", keywords: ["LINK"],
-      trackedDestinationUrl: "https://example.com/resource", secondaryDestinationUrl: "https://example.com/second", secondaryButtonLabel: "Second",
+      trackedDestinationUrl: "https://example.com/resource", linkButtonLabel: "Open resource", secondaryDestinationUrl: "https://example.com/second", secondaryButtonLabel: "Second",
       openingDmEnabled: true, openingDmMessage: "Confirm", openingDmButtonLabel: "Yes",
       idempotencyKey: `test-${suffix}`, isActive: true, lifecycle: "ACTIVE", workspaceId: second.workspace.id };
     const create = () => fetch(base + "/api/v1/campaigns", { ...post(draft), headers });
@@ -88,19 +89,45 @@ async function main() {
     assert.equal(await db.integrationEvent.count({ where: { workspaceId: first.workspace.id, eventType: "conversion.form_completed" } }), 1);
     client = new Client({ name: "openreply-local-review", version: "1.0" });
     await client.connect(new StreamableHTTPClientTransport(new URL(base + "/api/mcp"), { requestInit: { headers: { Authorization: `Bearer ${token}` } } }));
-    const tools = await client.listTools(); assert.equal(tools.tools.length, 5);
+    const tools = await client.listTools(); assert.equal(tools.tools.length, 6);
     const list = await client.callTool({ name: "list_campaigns", arguments: {} }); assert.ok(!list.isError);
     const mcpDetail = await client.callTool({ name: "get_campaign", arguments: { id: stored.id } });
     assert.ok(!mcpDetail.isError);
     const content = mcpDetail.content as Array<{ type: string; text?: string }>;
     assert.deepEqual(JSON.parse(content[0].text!), detail);
     const mcpDraft = await client.callTool({ name: "create_draft", arguments: { ...draft, idempotencyKey: `mcp-${suffix}` } }); assert.ok(!mcpDraft.isError);
+    const patch = (input: unknown, authorization = headers.Authorization) => fetch(base + "/api/v1/campaigns", {
+      method: "PATCH", headers: { ...headers, Authorization: authorization }, body: JSON.stringify(input),
+    });
+    const edit = { id: stored.id, expectedVersion: 1, changes: { openingDmButtonLabel: "Send resources" } };
+    const edited = await patch(edit); assert.equal(edited.status, 200); assert.deepEqual(await edited.json(), { campaignId: stored.id, version: 2 });
+    assert.equal((await patch(edit)).status, 409);
+    assert.equal((await patch({ id: stored.id, expectedVersion: 2, changes: { lifecycle: "ACTIVE" } })).status, 400);
+    const mcpEdit = await client.callTool({ name: "update_draft", arguments: { id: stored.id, expectedVersion: 2, changes: { secondaryButtonLabel: "More resources" } } });
+    assert.ok(!mcpEdit.isError);
+    const editedCampaign = await db.automation.findUniqueOrThrow({ where: { id: stored.id } });
+    assert.equal(editedCampaign.version, 3); assert.equal(editedCampaign.dmMessage, stored.dmMessage);
+    assert.equal(editedCampaign.openingDmEnabled, true); assert.equal(editedCampaign.lifecycle, "DRAFT"); assert.equal(editedCampaign.isActive, false);
+    const revisions = await db.campaignRevision.findMany({ where: { automationId: stored.id }, orderBy: { createdAt: "asc" } });
+    assert.equal(revisions.length, 3); assert.equal(revisions[2].actorId, key.id);
+    assert.equal(await db.dmLog.count({ where: { automationId: stored.id } }), 0);
+    assert.equal(await db.deliveryEvent.count({ where: { automationId: stored.id } }), 0);
+    assert.equal((await patch({ id: stored.id, expectedVersion: 3, changes: { openingDmButtonLabel: "x".repeat(21) } })).status, 400);
+    const foreignKeyResponse = await session("/api/integrations/keys", { name: "foreign writer", scopes: ["drafts:write"] }, second.cookie);
+    assert.equal(foreignKeyResponse.status, 201); const foreignKey = await foreignKeyResponse.json();
+    assert.equal((await patch({ id: stored.id, expectedVersion: 3, changes: { name: "Foreign" } }, `Bearer ${foreignKey.token}`)).status, 404);
+    await db.automation.update({ where: { id: stored.id }, data: { lifecycle: "PAUSED" } });
+    assert.equal((await patch({ id: stored.id, expectedVersion: 3, changes: { name: "Paused" } })).status, 409);
+    await db.automation.update({ where: { id: stored.id }, data: { lifecycle: "DRAFT" } });
+    assert.equal((await db.automation.findUniqueOrThrow({ where: { id: stored.id } })).version, 3);
     const missingPermissionResponse = await session("/api/integrations/keys", { name: "readonly acceptance", scopes: ["campaigns:read"] });
     const readonly = await missingPermissionResponse.json();
     assert.equal((await fetch(base + "/api/v1/campaigns", { ...post(draft), headers: { ...headers, Authorization: `Bearer ${readonly.token}` } })).status, 403);
+    assert.equal((await patch({ id: stored.id, expectedVersion: 3, changes: { name: "Forbidden" } }, `Bearer ${readonly.token}`)).status, 403);
     await db.serviceKey.update({ where: { id: key.id }, data: { revokedAt: new Date() } });
     assert.equal((await fetch(base + "/api/v1/campaigns", { headers })).status, 401);
-    console.log("PASS: actual HTTP sessions/scopes/workspace isolation, 30/60/90-day keys and unchanged existing keys, bounded JSON, concurrent draft dedupe, full safe API/MCP details, conversions, official MCP initialize/list/call, key revocation; no Meta send.");
+    assert.equal((await patch({ id: stored.id, expectedVersion: 3, changes: { name: "Revoked" } })).status, 401);
+    console.log("PASS: actual HTTP sessions/scopes/workspace isolation, 30/60/90-day keys and unchanged existing keys, bounded JSON, concurrent draft dedupe, safe API/MCP details, version-guarded REST/MCP draft updates and history, conversions, official MCP initialize/list/call, key revocation; no Meta send.");
   } finally {
     await client?.close();
     // Only exact user IDs created by this run in the guarded disposable DB.

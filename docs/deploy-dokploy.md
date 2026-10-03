@@ -176,9 +176,29 @@ timestamp; outside the known 24-hour window they are skipped.
   an empty array and null aliases, not invented URLs. Link order matches worker
   button order, including legacy position ties. Account tokens, recipient logs,
   report-share slugs and credentials are never part of campaign details.
+  PATCH edits only an existing inactive DRAFT with `drafts:write`:
+  `{ "id": "<campaign-id>", "expectedVersion": 1, "changes": { "openingDmButtonLabel": "Send links" } }`.
+  Read detail first; successful edits return campaignId and the new version.
+  Omitted fields remain unchanged; unknown fields, status/account/post-binding
+  changes and empty patches are rejected. ACTIVE, PAUSED, ARCHIVED and stale
+  versions return409; foreign/missing campaigns return404. After a timeout or
+  conflict, read back before deciding whether to edit again: a repeat with the
+  old version cannot overwrite newer content. Each successful edit adds one
+  immutable revision attributed to the service key, in the same transaction.
+  URLs may be updated or removed with null/empty string; a secondary button label
+  may be changed alone when that link exists. Removing a primary while retaining
+  a secondary is rejected; remove both together if required. Existing tracking
+  identities remain stable for URL edits. Full resulting content is validated;
+  incomplete drafts remain allowed, but legacy invalid labels must be corrected.
+  Button labels max20 UTF-16 units; stored messages max1000. Actual button-template
+  messages are cut at640 by both send paths, so assistants should budget the
+  rendered button message (including personalization) below that separately.
+  The service operation's version guard does not retrofit optimistic locking
+  into the existing full-payload dashboard editor. Reload any editor opened
+  before an assistant edit, otherwise a stale UI save can overwrite newer content.
 - `/api/mcp`: stateless Streamable HTTP with Bearer header, initialize, tools/list,
   tools/call and notifications. Tools: list_campaigns, get_campaign,
-  get_campaign_stats, create_draft, validate_campaign (completeness only).
+  get_campaign_stats, create_draft, update_draft, validate_campaign (completeness only).
   Tested with the official MCP client. Not an OAuth/dynamic-registration server;
   use a client supporting custom Authorization headers. Claude's Request headers
   feature is rollout-dependent: choose No sign-in and Authorization with the full
@@ -199,6 +219,10 @@ timestamp; outside the known 24-hour window they are skipped.
 
 Screenshot/text AI drafting can happen in the connected assistant, then call
 create_draft with reviewed facts. Missing URLs stay missing; never invent links.
+To revise a draft, call get_campaign then update_draft with its current version
+and only reviewed changed fields. The same write scope permits both operations;
+no key is automatically created, extended or granted extra scopes. Neither tool
+can publish or send. These capabilities require deployment of this source.
 No new paid AI provider, autonomous public replies, TikTok integration, A/B split
 or no-click reminders are enabled here. Those require confirmed access and
 recipient-level signals first. Existing reminders are time-based only.
