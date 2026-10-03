@@ -21,6 +21,6 @@ export async function assertNextReelAvailable(tx: Prisma.TransactionClient, acco
   if (pending) throw new CampaignMutationError(`Another campaign is already armed for the next reel: ${pending.name}. Bind it to a post or pause it first.`);
 }
 export async function saveCampaignRevision(tx: Prisma.TransactionClient, campaign: Automation, actorId?: string) {
-  const links = await tx.trackedLink.findMany({ where: { automationId: campaign.id }, orderBy: [{ position: "asc" }, { id: "asc" }], select: { position: true, label: true, destinationUrl: true } });
+  const links = await tx.trackedLink.findMany({ where: { automationId: campaign.id, workspaceId: campaign.workspaceId }, orderBy: [{ position: "asc" }, { id: "asc" }], select: { position: true, label: true, destinationUrl: true } });
   await tx.campaignRevision.create({ data: { workspaceId: campaign.workspaceId, automationId: campaign.id, actorId, snapshot: JSON.parse(JSON.stringify({ ...campaign, trackedLinks: links })) as Prisma.InputJsonValue } });
 }

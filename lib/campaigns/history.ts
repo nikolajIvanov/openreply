@@ -11,6 +11,14 @@ export function safeRevisionSnapshot(snapshot: unknown) {
     const item = link as Record<string, unknown>;
     return { label: typeof item.label === "string" ? item.label : null, destinationUrl: typeof item.destinationUrl === "string" ? item.destinationUrl : null, position: typeof item.position === "number" ? item.position : null };
   });
+  // Older integration drafts stored destinations directly, without a version.
+  // Project only their recorded values; never backfill from today's campaign.
+  else {
+    const links = [];
+    if (typeof source.trackedDestinationUrl === "string") links.push({ label: null, destinationUrl: source.trackedDestinationUrl, position: 0 });
+    if (typeof source.secondaryDestinationUrl === "string") links.push({ label: typeof source.secondaryButtonLabel === "string" ? source.secondaryButtonLabel : null, destinationUrl: source.secondaryDestinationUrl, position: 1 });
+    if (links.length) result.trackedLinks = links;
+  }
   return result;
 }
 export function safeDeliveryError(error: string | null) {

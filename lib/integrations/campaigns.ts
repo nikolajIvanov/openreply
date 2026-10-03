@@ -3,6 +3,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/db/client";
 import { contentSchema, httpUrl } from "@/lib/library/schema";
 import { buildInitialCampaignLinks } from "@/lib/campaigns/links";
+import { saveCampaignRevision } from "@/lib/campaigns/mutations";
 import { generateReportShareSlug } from "@/lib/reports/share";
 import { ApiError } from "./http";
 import { requireScope, type ServiceContext } from "./auth";
@@ -72,9 +73,7 @@ export async function createDraft(context: ServiceContext, input: unknown) {
     } });
     await tx.integrationEvent.create({ data: { workspaceId: context.workspaceId, automationId: campaign.id,
       externalId, eventType: "campaign.draft_created", payload: { campaignId: campaign.id, fingerprint } } });
-    await tx.campaignRevision.create({ data: { workspaceId: context.workspaceId, automationId: campaign.id,
-      actorId: context.keyId, snapshot: { ...data, lifecycle: "DRAFT", isActive: false,
-        trackedDestinationUrl: trackedDestinationUrl ?? null, secondaryDestinationUrl: secondaryDestinationUrl ?? null } } });
+    await saveCampaignRevision(tx, campaign, context.keyId);
     return { campaignId: campaign.id, replayed: false };
   });
 }

@@ -21,6 +21,8 @@ import { POST as simulate } from "@/app/api/automations/validate/route";
 import { duplicateCampaign } from "@/lib/campaigns/duplicate";
 import { GET as history } from "@/app/api/campaigns/history/route";
 import { POST as importCampaigns } from "@/app/api/automations/import/route";
+import { createDraft } from "@/lib/integrations/campaigns";
+import { GET as editorHistory } from "@/app/api/automations/history/route";
 
 const DATABASE_URL = process.env.TEST_DATABASE_URL;
 const MIGRATIONS_DIR = path.join(__dirname, "..", "prisma", "migrations");
@@ -181,14 +183,61 @@ describe.skipIf(!DATABASE_URL)("campaign lifecycle on real PostgreSQL", () => {
     expect(JSON.stringify(data)).not.toContain("private-provider-token");
     expect(JSON.stringify(data)).not.toContain("raw-instagram-recipient");
     expect(JSON.stringify(data)).not.toContain("never-expose");
+    const editorResponse = await editorHistory(new NextRequest(`http://localhost/api/automations/history?id=${id}`));
+    expect(editorResponse.status).toBe(200);
+    expect(editorResponse.headers.get("Cache-Control")).toBe("no-store");
+    expect(JSON.stringify(await editorResponse.json())).not.toContain("never-expose");
     expect(data.conversions).toEqual(expect.arrayContaining([{ eventType: "conversion.resource_downloaded", count: 2 }, { eventType: "conversion.form_completed", count: 1 }]));
     expect(data.conversions).toHaveLength(2);
     expect(await state.db.deliveryEvent.count()).toBe(before);
     state.workspaceId = "otherws";
     expect((await history(new NextRequest(`http://localhost/api/campaigns/history?id=${id}`))).status).toBe(404);
+    expect((await editorHistory(new NextRequest(`http://localhost/api/automations/history?id=${id}`))).status).toBe(404);
     state.authorized = false;
     expect((await history(new NextRequest(`http://localhost/api/campaigns/history?id=${id}`))).status).toBe(401);
+    expect((await editorHistory(new NextRequest(`http://localhost/api/automations/history?id=${id}`))).status).toBe(401);
     state.authorized = true;
     expect((await history(new NextRequest("http://localhost/api/campaigns/history"))).status).toBe(400);
+    expect((await editorHistory(new NextRequest("http://localhost/api/automations/history"))).status).toBe(400);
+  });
+  it("records one immutable v1 link snapshot for concurrent integration draft retries", async () => {
+    const context = { workspaceId: "ws", keyId: "review-service", scopes: ["drafts:write"] };
+    const input = { name: "Integration snapshot", instagramAccountId: "account", keywords: ["snapshot"],
+      dmMessage: "Here is {link}", trackedDestinationUrl: "https://example.com/v1",
+      secondaryDestinationUrl: "https://example.com/secondary-v1", secondaryButtonLabel: "Second",
+      idempotencyKey: "snapshot-regression", lifecycle: "ACTIVE", isActive: true };
+    const results = await Promise.all([createDraft(context, input), createDraft(context, input), createDraft(context, input)]);
+    expect(new Set(results.map(r => r.campaignId)).size).toBe(1);
+    expect(results.filter(r => !r.replayed)).toHaveLength(1);
+    const id = results[0].campaignId;
+    expect(await state.db.automation.findUniqueOrThrow({ where: { id } })).toMatchObject({ version: 1, lifecycle: "DRAFT", isActive: false, postId: null, armedAt: null });
+    const revisions = await state.db.campaignRevision.findMany({ where: { automationId: id } });
+    expect(revisions).toHaveLength(1);
+    expect(revisions[0].snapshot).toMatchObject({ version: 1, lifecycle: "DRAFT", isActive: false, trackedLinks: [
+      { destinationUrl: "https://example.com/v1", position: 0, label: "Primary campaign link" },
+      { destinationUrl: "https://example.com/secondary-v1", position: 1, label: "Second" },
+    ] });
+    const oldSnapshot = revisions[0].snapshot;
+    expect((await PATCH(request("PATCH", { lifecycle: "DRAFT", trackedDestinationUrl: "https://example.com/v2", secondaryDestinationUrl: "https://example.com/secondary-v2", secondaryButtonLabel: "Updated" }, id))).status).toBe(200);
+    const later = await state.db.campaignRevision.findMany({ where: { automationId: id }, orderBy: { createdAt: "asc" } });
+    expect(later).toHaveLength(2);
+    expect(later[0].snapshot).toEqual(oldSnapshot);
+    expect(later[1].snapshot).toMatchObject({ version: 2, trackedLinks: [
+      { destinationUrl: "https://example.com/v2", position: 0 },
+      { destinationUrl: "https://example.com/secondary-v2", position: 1, label: "Updated" },
+    ] });
+    await createDraft(context, input);
+    expect(await state.db.campaignRevision.count({ where: { automationId: id } })).toBe(2);
+    expect(await state.db.dmLog.count({ where: { automationId: id } })).toBe(0);
+    expect(await state.db.deliveryEvent.count({ where: { automationId: id } })).toBe(0);
+  });
+  it("records an incomplete integration draft without links and rejects cross-workspace accounts", async () => {
+    const context = { workspaceId: "ws", keyId: "review-service", scopes: ["drafts:write"] };
+    const input = { name: "Incomplete audit draft", instagramAccountId: "account", idempotencyKey: "incomplete-audit" };
+    const result = await createDraft(context, input);
+    const revision = await state.db.campaignRevision.findFirstOrThrow({ where: { automationId: result.campaignId } });
+    expect(revision.snapshot).toMatchObject({ version: 1, lifecycle: "DRAFT", isActive: false, postId: null, trackedLinks: [] });
+    await expect(createDraft(context, { ...input, instagramAccountId: "otheraccount", idempotencyKey: "foreign-audit" })).rejects.toMatchObject({ status: 404 });
+    expect(await state.db.integrationEvent.count({ where: { workspaceId: "ws", externalId: "draft:foreign-audit" } })).toBe(0);
   });
 });
