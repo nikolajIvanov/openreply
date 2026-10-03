@@ -162,18 +162,29 @@ timestamp; outside the known 24-hour window they are skipped.
   and reported conversion counts. Raw link requests may include bot previews and
   repeats; clicks/100 sends is not a unique-recipient conversion percentage.
 - `/integrations`: an admin creates scoped, revocable service keys with max90-day
-  expiry (UI defaults30 days). Raw token returned only once; store in the client
+  expiry (UI offers30/60/90 days, defaults30). Changing this choice only affects
+  newly created keys; existing keys retain their original expiry. Raw token
+  returned only once; store in the client
   secret store, never in URLs, logs or workflows exported to GitHub.
 - `/api/v1/campaigns`: GET list (latest100), `?id=…` detail, `?id=…&stats` outcomes;
   POST creates only a DRAFT. Payload includes `instagramAccountId`, `name`, content
   and stable `idempotencyKey`. Retrying identical input returns the same campaign;
   reusing the key for changed content returns409. No service key can publish/send.
+  List responses stay compact; detail (`?id=…` and MCP `get_campaign`) includes
+  version, campaign content/trigger flags and ordered trackedLinks (destination,
+  label, position), plus primary/secondary destination aliases. No links means
+  an empty array and null aliases, not invented URLs. Link order matches worker
+  button order, including legacy position ties. Account tokens, recipient logs,
+  report-share slugs and credentials are never part of campaign details.
 - `/api/mcp`: stateless Streamable HTTP with Bearer header, initialize, tools/list,
   tools/call and notifications. Tools: list_campaigns, get_campaign,
   get_campaign_stats, create_draft, validate_campaign (completeness only).
   Tested with the official MCP client. Not an OAuth/dynamic-registration server;
-  use a client supporting custom Authorization headers, not an assumed Claude-Web
-  connector. Origin checked; accept JSON and event-stream; GET stream returns405.
+  use a client supporting custom Authorization headers. Claude's Request headers
+  feature is rollout-dependent: choose No sign-in and Authorization with the full
+  `Bearer <key>` value when available. A user-reported Claude read test succeeded;
+  no production Claude draft-write acceptance is implied. Origin checked; accept
+  JSON and event-stream; GET stream returns405.
 - `/api/v1/events`: events:read scope, immutable integration rows plus persisted
   delivery outcomes. Poll `since` ISO timestamp; follow all `nextCursor` pages;
   only checkpoint after successful processing. Start next poll using returned

@@ -33,20 +33,48 @@ async function main() {
       return fetch(base + path, { ...init, headers: { ...(input === undefined ? {} : { "Content-Type": "application/json" }), Cookie: cookie, Origin: origin } });
     }
     assert.equal((await session("/api/integrations/keys", { name: "bad origin", scopes: ["campaigns:read"] }, first.cookie, "https://evil.example")).status, 403);
+    const pageResponse = await session("/integrations");
+    assert.equal(pageResponse.status, 200);
+    const pageHtml = await pageResponse.text();
+    for (const days of [30, 60, 90]) assert.ok(pageHtml.includes(`value="${days}"`));
+    assert.match(pageHtml, /<option[^>]*value="30"[^>]*selected=""/);
     const keyResponse = await session("/api/integrations/keys", { name: "local acceptance", scopes: ["campaigns:read", "drafts:write", "events:read", "conversions:write"] });
     assert.equal(keyResponse.status, 201, await keyResponse.clone().text());
     const { token, key } = await keyResponse.json();
+    const originalKey = await db.serviceKey.findUniqueOrThrow({ where: { id: key.id } });
+    for (const days of [30, 60, 90]) {
+      const started = Date.now();
+      const response = await session("/api/integrations/keys", { name: `local ${days} days`, scopes: ["campaigns:read"], days });
+      assert.equal(response.status, 201);
+      const created = await response.json();
+      const expiry = new Date(created.key.expiresAt).getTime();
+      assert.ok(expiry >= started + days * 86400000 && expiry <= Date.now() + days * 86400000);
+    }
+    for (const days of [0, 91, 365, 30.5]) {
+      assert.equal((await session("/api/integrations/keys", { name: "invalid days", scopes: ["campaigns:read"], days })).status, 400);
+    }
+    assert.deepEqual(await db.serviceKey.findUniqueOrThrow({ where: { id: key.id } }), originalKey);
     const keyList = await (await session("/api/integrations/keys")).json();
     assert.ok(!JSON.stringify(keyList).includes(token)); assert.ok(!JSON.stringify(keyList).includes("tokenHash"));
     const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
     const draft = { instagramAccountId: first.account.id, name: "Acceptance draft", dmMessage: "Hello {username}, {link}", keywords: ["LINK"],
-      trackedDestinationUrl: "https://example.com/resource", idempotencyKey: `test-${suffix}`, isActive: true, lifecycle: "ACTIVE", workspaceId: second.workspace.id };
+      trackedDestinationUrl: "https://example.com/resource", secondaryDestinationUrl: "https://example.com/second", secondaryButtonLabel: "Second",
+      openingDmEnabled: true, openingDmMessage: "Confirm", openingDmButtonLabel: "Yes",
+      idempotencyKey: `test-${suffix}`, isActive: true, lifecycle: "ACTIVE", workspaceId: second.workspace.id };
     const create = () => fetch(base + "/api/v1/campaigns", { ...post(draft), headers });
     const responses = await Promise.all([create(), create()]);
     assert.ok(responses.every(response => response.status === 201), JSON.stringify(await Promise.all(responses.map(async response => ({ status: response.status, body: await response.clone().text() })))));
     const values = await Promise.all(responses.map(response => response.json())); assert.equal(values[0].campaignId, values[1].campaignId);
     const stored = await db.automation.findUniqueOrThrow({ where: { id: values[0].campaignId } });
     assert.equal(stored.workspaceId, first.workspace.id); assert.equal(stored.lifecycle, "DRAFT"); assert.equal(stored.isActive, false);
+    const detailResponse = await fetch(base + `/api/v1/campaigns?id=${stored.id}`, { headers });
+    assert.equal(detailResponse.status, 200);
+    const { data: detail } = await detailResponse.json();
+    assert.equal(detail.trackedDestinationUrl, draft.trackedDestinationUrl);
+    assert.equal(detail.secondaryDestinationUrl, draft.secondaryDestinationUrl);
+    assert.equal(detail.openingDmMessage, "Confirm"); assert.equal(detail.version, 1);
+    assert.equal(detail.trackedLinks.length, 2);
+    for (const field of ["accessToken", "reportShareSlug", "instagramAccount", "dmLogs", "deliveryEvents"]) assert.ok(!(field in detail));
     const foreign = await fetch(base + "/api/v1/campaigns", { ...post({ ...draft, instagramAccountId: second.account.id, idempotencyKey: `foreign-${suffix}` }), headers }); assert.equal(foreign.status, 404);
     assert.equal((await fetch(base + "/api/v1/campaigns", { ...post({ ...draft, dmMessage: "Changed" }), headers })).status, 409);
     assert.equal((await fetch(base + "/api/v1/campaigns", { method: "POST", headers, body: "not json" })).status, 400);
@@ -62,13 +90,17 @@ async function main() {
     await client.connect(new StreamableHTTPClientTransport(new URL(base + "/api/mcp"), { requestInit: { headers: { Authorization: `Bearer ${token}` } } }));
     const tools = await client.listTools(); assert.equal(tools.tools.length, 5);
     const list = await client.callTool({ name: "list_campaigns", arguments: {} }); assert.ok(!list.isError);
+    const mcpDetail = await client.callTool({ name: "get_campaign", arguments: { id: stored.id } });
+    assert.ok(!mcpDetail.isError);
+    const content = mcpDetail.content as Array<{ type: string; text?: string }>;
+    assert.deepEqual(JSON.parse(content[0].text!), detail);
     const mcpDraft = await client.callTool({ name: "create_draft", arguments: { ...draft, idempotencyKey: `mcp-${suffix}` } }); assert.ok(!mcpDraft.isError);
     const missingPermissionResponse = await session("/api/integrations/keys", { name: "readonly acceptance", scopes: ["campaigns:read"] });
     const readonly = await missingPermissionResponse.json();
     assert.equal((await fetch(base + "/api/v1/campaigns", { ...post(draft), headers: { ...headers, Authorization: `Bearer ${readonly.token}` } })).status, 403);
     await db.serviceKey.update({ where: { id: key.id }, data: { revokedAt: new Date() } });
     assert.equal((await fetch(base + "/api/v1/campaigns", { headers })).status, 401);
-    console.log("PASS: actual HTTP sessions/scopes/workspace isolation, bounded JSON, concurrent draft dedupe, conversions, official MCP initialize/list/call, key revocation; no Meta send.");
+    console.log("PASS: actual HTTP sessions/scopes/workspace isolation, 30/60/90-day keys and unchanged existing keys, bounded JSON, concurrent draft dedupe, full safe API/MCP details, conversions, official MCP initialize/list/call, key revocation; no Meta send.");
   } finally {
     await client?.close();
     // Only exact user IDs created by this run in the guarded disposable DB.

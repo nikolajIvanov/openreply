@@ -21,7 +21,8 @@ import { POST as simulate } from "@/app/api/automations/validate/route";
 import { duplicateCampaign } from "@/lib/campaigns/duplicate";
 import { GET as history } from "@/app/api/campaigns/history/route";
 import { POST as importCampaigns } from "@/app/api/automations/import/route";
-import { createDraft } from "@/lib/integrations/campaigns";
+import { createDraft, getCampaign, listCampaigns } from "@/lib/integrations/campaigns";
+import { callTool } from "@/lib/integrations/mcp";
 import { GET as editorHistory } from "@/app/api/automations/history/route";
 
 const DATABASE_URL = process.env.TEST_DATABASE_URL;
@@ -239,5 +240,51 @@ describe.skipIf(!DATABASE_URL)("campaign lifecycle on real PostgreSQL", () => {
     expect(revision.snapshot).toMatchObject({ version: 1, lifecycle: "DRAFT", isActive: false, postId: null, trackedLinks: [] });
     await expect(createDraft(context, { ...input, instagramAccountId: "otheraccount", idempotencyKey: "foreign-audit" })).rejects.toMatchObject({ status: 404 });
     expect(await state.db.integrationEvent.count({ where: { workspaceId: "ws", externalId: "draft:foreign-audit" } })).toBe(0);
+  });
+  it("returns complete safe integration details with ordered links without changing campaigns", async () => {
+    const context = { workspaceId: "ws", keyId: "detail-review", scopes: ["campaigns:read", "drafts:write"] };
+    const input = { ...complete, name: "Full integration detail", idempotencyKey: "detail-regression",
+      secondaryDestinationUrl: "https://example.com/second", secondaryButtonLabel: "Second",
+      wholeWordMatch: false, dmTriggerEnabled: true, openingDmEnabled: true,
+      openingDmMessage: "Opening", openingDmButtonLabel: "Yes", linkButtonLabel: "Resource",
+      requireFollow: true, followPromptMessage: "Follow", followPromptButtonLabel: "Done",
+      followUpEnabled: true, followUpMessage: "Later", followUpDelayMinutes: 60,
+      publicReplyEnabled: true, publicReplyMessage: "Sent", publicReplyMessages: ["Sent", "Check DM"] };
+    const { campaignId } = await createDraft(context, input);
+    // Return order is the worker's order, not insertion order or position equality.
+    const rows = await state.db.trackedLink.findMany({ where: { automationId: campaignId }, orderBy: { position: "asc" } });
+    await state.db.trackedLink.update({ where: { id: rows[0].id }, data: { position: 4 } });
+    const before = await state.db.automation.findUniqueOrThrow({ where: { id: campaignId } });
+    const revisionCount = await state.db.campaignRevision.count({ where: { automationId: campaignId } });
+    const detail = await getCampaign(context, campaignId);
+    expect(detail).toMatchObject({ lifecycle: "DRAFT", isActive: false, version: 1,
+      wholeWordMatch: false, dmTriggerEnabled: true, openingDmEnabled: true,
+      openingDmMessage: "Opening", openingDmButtonLabel: "Yes", linkButtonLabel: "Resource",
+      requireFollow: true, followPromptMessage: "Follow", followPromptButtonLabel: "Done",
+      followUpEnabled: true, followUpMessage: "Later", followUpDelayMinutes: 60,
+      publicReplyEnabled: true, publicReplyMessage: "Sent", publicReplyMessages: ["Sent", "Check DM"],
+      trackedDestinationUrl: "https://example.com/second", secondaryDestinationUrl: complete.trackedDestinationUrl,
+      secondaryButtonLabel: "Primary campaign link", trackedLinks: [
+        { destinationUrl: "https://example.com/second", label: "Second", position: 1 },
+        { destinationUrl: complete.trackedDestinationUrl, label: "Primary campaign link", position: 4 },
+      ] });
+    expect(Object.keys(detail.trackedLinks[0]).sort()).toEqual(["destinationUrl", "label", "position"]);
+    for (const privateField of ["workspaceId", "instagramAccount", "accessToken", "reportShareSlug", "dmLogs", "deliveryEvents"]) expect(detail).not.toHaveProperty(privateField);
+    const listed = (await listCampaigns(context)).find(row => row.id === campaignId)!;
+    expect(listed).not.toHaveProperty("trackedLinks");
+    expect(listed).not.toHaveProperty("openingDmMessage");
+    expect(await callTool(context, "get_campaign", { id: campaignId })).toEqual(detail);
+    expect(await state.db.automation.findUniqueOrThrow({ where: { id: campaignId } })).toEqual(before);
+    expect(await state.db.campaignRevision.count({ where: { automationId: campaignId } })).toBe(revisionCount);
+    expect(await state.db.dmLog.count({ where: { automationId: campaignId } })).toBe(0);
+    expect(await state.db.deliveryEvent.count({ where: { automationId: campaignId } })).toBe(0);
+  });
+  it("keeps detail reads scoped and represents missing links explicitly", async () => {
+    const context = { workspaceId: "ws", keyId: "detail-review", scopes: ["campaigns:read", "drafts:write"] };
+    const { campaignId } = await createDraft(context, { name: "No detail links", instagramAccountId: "account", idempotencyKey: "no-detail-links" });
+    expect(await getCampaign(context, campaignId)).toMatchObject({ trackedLinks: [], trackedDestinationUrl: null, secondaryDestinationUrl: null, secondaryButtonLabel: null });
+    await expect(getCampaign({ ...context, workspaceId: "otherws" }, campaignId)).rejects.toMatchObject({ status: 404 });
+    await expect(getCampaign({ ...context, scopes: ["drafts:write"] }, campaignId)).rejects.toMatchObject({ status: 403 });
+    await expect(getCampaign(context, "missing-detail")).rejects.toMatchObject({ status: 404 });
   });
 });

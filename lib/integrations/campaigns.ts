@@ -5,6 +5,7 @@ import { contentSchema, httpUrl } from "@/lib/library/schema";
 import { buildInitialCampaignLinks } from "@/lib/campaigns/links";
 import { saveCampaignRevision } from "@/lib/campaigns/mutations";
 import { generateReportShareSlug } from "@/lib/reports/share";
+import { TRACKED_LINK_ORDER } from "@/lib/tracking/link-order";
 import { ApiError } from "./http";
 import { requireScope, type ServiceContext } from "./auth";
 
@@ -33,9 +34,27 @@ export async function listCampaigns(context: ServiceContext) {
 export async function getCampaign(context: ServiceContext, id: string) {
   requireScope(context, "campaigns:read");
   const campaign = await prisma.automation.findFirst({ where: { id, workspaceId: context.workspaceId },
-    select: safeCampaignSelect });
+    select: {
+      ...safeCampaignSelect,
+      version: true, wholeWordMatch: true, dmTriggerEnabled: true,
+      openingDmEnabled: true, openingDmMessage: true, openingDmButtonLabel: true,
+      linkButtonLabel: true, requireFollow: true, followPromptMessage: true,
+      followPromptButtonLabel: true, followUpEnabled: true, followUpMessage: true,
+      followUpDelayMinutes: true, publicReplyEnabled: true, publicReplyMessage: true,
+      publicReplyMessages: true,
+      trackedLinks: {
+        where: { workspaceId: context.workspaceId }, orderBy: TRACKED_LINK_ORDER,
+        select: { destinationUrl: true, label: true, position: true },
+      },
+    } });
   if (!campaign) throw new ApiError("Campaign not found", 404);
-  return campaign;
+  // Match the worker's ordered-button semantics, including legacy position ties.
+  const [primary, secondary] = campaign.trackedLinks;
+  return { ...campaign,
+    trackedDestinationUrl: primary?.destinationUrl ?? null,
+    secondaryDestinationUrl: secondary?.destinationUrl ?? null,
+    secondaryButtonLabel: secondary?.label ?? null,
+  };
 }
 
 export async function getCampaignStats(context: ServiceContext, id: string) {
