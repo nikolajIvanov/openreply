@@ -21,7 +21,8 @@ const campaignSchema = z.object({
   publicReplyMessage: z.string().max(1000).optional().nullable(),
   trackedUrl: z.string().optional().nullable(),
   wholeWordMatch: z.boolean().optional().default(true),
-  isActive: z.boolean().optional().default(true),
+  // Accepted for legacy import clients, but never used as publication consent.
+  isActive: z.boolean().optional(),
 });
 
 const importSchema = z.object({
@@ -70,7 +71,7 @@ export async function POST(request: NextRequest) {
   });
   const usedPostIds = new Set(existing.map((a) => a.postId));
 
-  const created: { name: string; postId: string }[] = [];
+  const created: { name: string; postId: string; lifecycle: "DRAFT" }[] = [];
   const skipped: { row: number; reason: string }[] = [];
 
   let row = 0;
@@ -101,8 +102,10 @@ export async function POST(request: NextRequest) {
         dmMessage: campaign.dmMessage.slice(0, 1000),
         publicReplyEnabled: Boolean(publicReply),
         publicReplyMessage: publicReply ? publicReply.slice(0, 1000) : null,
-        isActive: campaign.isActive,
-        lifecycle: campaign.isActive ? "ACTIVE" : "PAUSED",
+        // Imported source state must never silently publish a new campaign.
+        // Activation requires a separate validated campaign update.
+        isActive: false,
+        lifecycle: "DRAFT",
         wholeWordMatch: campaign.wholeWordMatch,
         workspaceId: context.workspaceId,
         instagramAccountId: account.id,
@@ -125,11 +128,12 @@ export async function POST(request: NextRequest) {
     });
 
     usedPostIds.add(campaign.postId);
-    created.push({ name, postId: campaign.postId });
+    created.push({ name, postId: campaign.postId, lifecycle: "DRAFT" });
   }
 
   return NextResponse.json({
     success: true,
+    message: "Imported as drafts. Review and activate each campaign explicitly.",
     data: { created, skipped },
   });
 }

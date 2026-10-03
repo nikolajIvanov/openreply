@@ -20,6 +20,7 @@ import { POST, PATCH } from "@/app/api/automations/route";
 import { POST as simulate } from "@/app/api/automations/validate/route";
 import { duplicateCampaign } from "@/lib/campaigns/duplicate";
 import { GET as history } from "@/app/api/campaigns/history/route";
+import { POST as importCampaigns } from "@/app/api/automations/import/route";
 
 const DATABASE_URL = process.env.TEST_DATABASE_URL;
 const MIGRATIONS_DIR = path.join(__dirname, "..", "prisma", "migrations");
@@ -134,6 +135,28 @@ describe.skipIf(!DATABASE_URL)("campaign lifecycle on real PostgreSQL", () => {
   });
   it("rejects executable and credential-bearing URLs", async () => {
     for (const trackedDestinationUrl of ["javascript:alert(1)", "data:text/html,evil", "https://user:pass@example.com/"]) expect((await create({ ...complete, trackedDestinationUrl })).response.status).toBe(400);
+  });
+  it("imports true, false and unspecified source states as drafts with revisions", async () => {
+    const response = await importCampaigns(request("POST", { instagramAccountId: "account", campaigns: [
+      { postId: "import-explicit-active", name: "Source active", keywords: ["link"], dmMessage: "Import content", isActive: true },
+      { postId: "import-unspecified-status", name: "Source unspecified", keywords: ["link"], dmMessage: "Import content" },
+      { postId: "import-explicit-paused", name: "Source paused", keywords: ["link"], dmMessage: "Import content", isActive: false },
+    ] }));
+    expect(response.status).toBe(200);
+    const payload = await response.json();
+    expect(payload.message).toContain("Imported as drafts");
+    expect(payload.data.created).toHaveLength(3);
+    expect(payload.data.created.every((row: { lifecycle: string }) => row.lifecycle === "DRAFT")).toBe(true);
+    const rows = await state.db.automation.findMany({ where: { postId: { in: ["import-explicit-active", "import-unspecified-status", "import-explicit-paused"] } } });
+    expect(rows).toHaveLength(3);
+    for (const campaign of rows) {
+      expect(campaign).toMatchObject({ lifecycle: "DRAFT", isActive: false, armedAt: null, version: 1 });
+      const revisions = await state.db.campaignRevision.findMany({ where: { automationId: campaign.id } });
+      expect(revisions).toHaveLength(1);
+      expect(revisions[0].snapshot).toMatchObject({ lifecycle: "DRAFT", isActive: false });
+    }
+    expect(await state.db.dmLog.count({ where: { automationId: { in: rows.map((r) => r.id) } } })).toBe(0);
+    expect(await state.db.deliveryEvent.count({ where: { automationId: { in: rows.map((r) => r.id) } } })).toBe(0);
   });
   it("shows every durable outcome and sanitized revisions only within the workspace", async () => {
     const { payload } = await create(complete);

@@ -405,6 +405,9 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
 
   async function handleSubmit(activeValue: boolean, lifecycleValue: CampaignLifecycle = activeValue ? "ACTIVE" : "PAUSED") {
     setError(null);
+    // CSV rows are imported as drafts. Review/publication is a separate action
+    // after the import, never inherited from source data or the primary save.
+    if (importQueue) { activeValue = false; lifecycleValue = "DRAFT"; }
 
     if (!selectedAccountId) return setError(t("Connect an Instagram account first."));
     if (activeValue && triggerScope === "specific" && !postId)
@@ -632,7 +635,7 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
           )}
         </div>
         <div className="ml-auto flex items-center gap-2">
-          <button type="button" onClick={() => handleSubmit(false, "DRAFT")} disabled={saving} className="rounded-lg border border-border px-4 py-2 text-sm disabled:opacity-50">{t("Save draft")}</button>
+          {!importQueue && <button type="button" onClick={() => handleSubmit(false, "DRAFT")} disabled={saving} className="rounded-lg border border-border px-4 py-2 text-sm disabled:opacity-50">{t("Save draft")}</button>}
           {mode === "edit" && <button type="button" onClick={() => handleSubmit(false, "ARCHIVED")} disabled={saving} className="rounded-lg border border-border px-4 py-2 text-sm disabled:opacity-50">{t("Archive")}</button>}
           {importQueue && (
             <button
@@ -670,7 +673,7 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
             disabled={saving}
             className="rounded-lg bg-accent px-5 py-2 text-sm font-medium text-white hover:bg-accent-hover disabled:opacity-50"
           >
-            {saving ? t("Saving…") : mode === "new" ? t("Go Live") : t("Save changes")}
+            {saving ? t("Saving…") : importQueue ? t("Save draft") : mode === "new" ? t("Go Live") : t("Save changes")}
           </button>
         </div>
       </div>
