@@ -1,4 +1,5 @@
 import { getMetaGraphApiVersion, requireEnv } from "@/lib/env";
+import { renderButtonLabel } from "@/lib/instagram/message-limits";
 
 function instagramGraphBase() {
   return `https://graph.instagram.com/${getMetaGraphApiVersion()}`;
@@ -200,7 +201,7 @@ export async function sendPrivateReplyWithButton(
               // Button template text is capped at 640 chars by Meta.
               text: text.slice(0, 640),
               buttons: [
-                { type: "postback", title: buttonTitle.slice(0, 20), payload },
+                { type: "postback", title: renderButtonLabel(buttonTitle), payload },
               ],
             },
           },
@@ -242,7 +243,7 @@ export async function sendDirectMessageWithButton(
               template_type: "button",
               text: text.slice(0, 640),
               buttons: [
-                { type: "postback", title: buttonTitle.slice(0, 20), payload },
+                { type: "postback", title: renderButtonLabel(buttonTitle), payload },
               ],
             },
           },
@@ -295,7 +296,7 @@ export interface LinkButton {
 function toWebUrlButtons(buttons: LinkButton[]) {
   return buttons
     .slice(0, 3)
-    .map((b) => ({ type: "web_url", url: b.url, title: b.title.slice(0, 20) }));
+    .map((b) => ({ type: "web_url", url: b.url, title: renderButtonLabel(b.title) }));
 }
 
 /**

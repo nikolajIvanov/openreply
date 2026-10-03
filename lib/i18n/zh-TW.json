@@ -474,5 +474,10 @@
   "Only one active campaign can wait for the next reel per account. Arming starts when you go live, not when you save a draft.": "每個帳號僅能有一個啟用中的活動等待下一則 Reel。等待從啟用時開始，而非儲存草稿時。",
   "Archive this campaign? Sending stops; links and reports remain available.": "封存此活動？將停止傳送，但保留連結與報表。",
   "Clicks / 100 sends": "每 100 則傳送的點擊數",
-  " clicks / 100 sends": " 每 100 則傳送的點擊數"
+  " clicks / 100 sends": " 每 100 則傳送的點擊數",
+  "Instagram buttons: max. {limit} characters including spaces.": "Instagram 按鈕：最多 {limit} 個字元（包含空格）。",
+  "Emojis may count as multiple characters. Display width varies by device; keep labels short.": "表情符號可能算作多個字元。顯示寬度因裝置而異，請使用簡短文字。",
+  "This button label is too long. Shorten it before saving; the preview shows the shortened send text.": "此按鈕文字過長。請縮短後再儲存；預覽顯示傳送時縮短的文字。",
+  "Button labels must be at most 20 characters including spaces. Shorten the highlighted labels before saving.": "按鈕文字最多 20 個字元（包含空格）。請縮短標示的文字後再儲存。",
+  "Overlong button labels are shortened in this preview, just as when sent. Edit the labels before saving.": "過長的按鈕文字在預覽中會如同傳送時縮短。請先修改文字再儲存。"
 }

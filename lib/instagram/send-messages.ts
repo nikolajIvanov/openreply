@@ -6,6 +6,7 @@ import {
   ZernioDeliveryUnconfirmedError,
 } from "@/lib/zernio/client";
 import type { InstagramContext, ZernioContext } from "./context";
+import { renderButtonLabel } from "./message-limits";
 
 type Button =
   | { type: "url"; title: string; url: string }
@@ -70,7 +71,7 @@ async function sendZernioMessage({
 function linkButtons(buttons: meta.LinkButton[]): Button[] {
   return buttons
     .slice(0, 3)
-    .map(({ title, url }) => ({ type: "url", title: title.slice(0, 20), url }));
+    .map(({ title, url }) => ({ type: "url", title: renderButtonLabel(title), url }));
 }
 
 export async function sendPrivateReply({
@@ -127,7 +128,7 @@ export async function sendPrivateReplyWithButton({
     commentId,
     postId,
     text: text,
-    buttons: [{ type: "postback", title: buttonTitle.slice(0, 20), payload }],
+    buttons: [{ type: "postback", title: renderButtonLabel(buttonTitle), payload }],
   });
 }
 
@@ -159,7 +160,7 @@ export async function sendDirectMessageWithButton({
     context,
     recipientId: userId,
     text: text,
-    buttons: [{ type: "postback", title: buttonTitle.slice(0, 20), payload }],
+    buttons: [{ type: "postback", title: renderButtonLabel(buttonTitle), payload }],
   });
 }
 

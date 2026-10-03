@@ -7,7 +7,7 @@ import { buildTrackedUrl } from "@/lib/tracking/message";
 import { TRACKED_LINK_ORDER } from "@/lib/tracking/link-order";
 import { CAMPAIGN_LIFECYCLES, campaignActivationErrors } from "@/lib/campaigns/selection";
 import { CampaignMutationError, assertNextReelAvailable, resolveLifecycle, saveCampaignRevision } from "@/lib/campaigns/mutations";
-import { httpUrl } from "@/lib/library/schema";
+import { httpUrl, instagramButtonLabelSchema } from "@/lib/library/schema";
 import {
   buildInitialCampaignLinks,
   syncCampaignLinks,
@@ -37,11 +37,11 @@ const createAutomationSchema = z
     dmMessage: z.string().max(1000).optional().default(""),
     openingDmEnabled: z.boolean().optional().default(false),
     openingDmMessage: z.string().max(1000).optional().nullable(),
-    openingDmButtonLabel: z.string().max(64).optional().nullable(),
-    linkButtonLabel: z.string().max(20).optional().nullable(),
+    openingDmButtonLabel: instagramButtonLabelSchema.optional().nullable(),
+    linkButtonLabel: instagramButtonLabelSchema.optional().nullable(),
     requireFollow: z.boolean().optional().default(false),
     followPromptMessage: z.string().max(1000).optional().nullable(),
-    followPromptButtonLabel: z.string().max(20).optional().nullable(),
+    followPromptButtonLabel: instagramButtonLabelSchema.optional().nullable(),
     followUpEnabled: z.boolean().optional().default(false),
     followUpMessage: z.string().max(1000).optional().nullable(),
     // Minutes to wait before the follow-up. Capped at 24h so it stays inside
@@ -64,7 +64,7 @@ const createAutomationSchema = z
       .union([httpUrl, z.literal("")])
       .optional()
       .nullable(),
-    secondaryButtonLabel: z.string().max(20).optional().nullable(),
+    secondaryButtonLabel: instagramButtonLabelSchema.optional().nullable(),
     isActive: z.boolean().optional().default(true),
     lifecycle: z.enum(CAMPAIGN_LIFECYCLES).optional(),
     priority: z.number().int().min(-1000).max(1000).optional().default(0),
@@ -89,11 +89,11 @@ const updateAutomationSchema = z.object({
   dmMessage: z.string().max(1000).optional(),
   openingDmEnabled: z.boolean().optional(),
   openingDmMessage: z.string().max(1000).optional().nullable(),
-  openingDmButtonLabel: z.string().max(64).optional().nullable(),
-  linkButtonLabel: z.string().max(20).optional().nullable(),
+  openingDmButtonLabel: instagramButtonLabelSchema.optional().nullable(),
+  linkButtonLabel: instagramButtonLabelSchema.optional().nullable(),
   requireFollow: z.boolean().optional(),
   followPromptMessage: z.string().max(1000).optional().nullable(),
-  followPromptButtonLabel: z.string().max(20).optional().nullable(),
+  followPromptButtonLabel: instagramButtonLabelSchema.optional().nullable(),
   followUpEnabled: z.boolean().optional(),
   followUpMessage: z.string().max(1000).optional().nullable(),
   followUpDelayMinutes: z.number().int().min(0).max(1440).optional(),
@@ -117,7 +117,7 @@ const updateAutomationSchema = z.object({
     .union([httpUrl, z.literal("")])
     .optional()
     .nullable(),
-  secondaryButtonLabel: z.string().max(20).optional().nullable(),
+  secondaryButtonLabel: instagramButtonLabelSchema.optional().nullable(),
 });
 
 export async function GET(request: NextRequest) {
@@ -560,6 +560,19 @@ export async function PATCH(request: NextRequest) {
       secondaryUrl: secondaryDestinationUrl,
       secondaryLabel: secondaryButtonLabel,
     });
+
+    // Validate the effective links after synchronization, not merely submitted
+    // labels: label-only requests may leave links unchanged; removals reorder
+    // them. Any error rolls back the entire campaign/link update atomically.
+    if (final.isActive) {
+      const links = await tx.trackedLink.findMany({ where: { automationId, workspaceId }, orderBy: TRACKED_LINK_ORDER });
+      const errors = campaignActivationErrors({ ...campaign,
+        trackedDestinationUrl: links[0]?.destinationUrl,
+        secondaryDestinationUrl: links[1]?.destinationUrl,
+        secondaryButtonLabel: links[1]?.label,
+      });
+      if (errors.length) throw new CampaignMutationError(errors.join(" "), 400);
+    }
 
     await saveCampaignRevision(tx, campaign, context.userId);
     return campaign;

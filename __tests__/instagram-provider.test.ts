@@ -8,6 +8,7 @@ vi.mock("@/lib/meta/oauth", () => ({
 import {
   createInstagramContext,
   sendPrivateReplyWithButton,
+  sendDirectMessageWithButton,
   sendDirectMessageWithLinkButton,
   getRecentMediaComments,
   getUserFollowStatus,
@@ -89,6 +90,20 @@ describe("Instagram provider boundary", () => {
     expect(JSON.parse(fetchMock.mock.calls[0][1].body).buttons[0].type).toBe(
       "url"
     );
+  });
+  it.each(["META", "ZERNIO"] as const)("uses the same safe title fallback for all %s sends", async (provider) => {
+    const selected = provider === "META" ? { provider, accessToken: "test-token" } : context;
+    const title = "a".repeat(19) + "😀 more";
+    for (const kind of ["private", "postback", "url"] as const) {
+      respond({ message_id: "mid", messageId: "mid" });
+      if (kind === "private") await sendPrivateReplyWithButton({ context: selected, instagramAccountId: "ig", commentId: "comment", postId: "post", text: "Hi", buttonTitle: title, payload: "opaque" });
+      else if (kind === "postback") await sendDirectMessageWithButton({ context: selected, instagramAccountId: "ig", userId: "recipient", text: "Hi", buttonTitle: title, payload: "opaque" });
+      else await sendDirectMessageWithLinkButton({ context: selected, instagramAccountId: "ig", userId: "recipient", text: "Hi", buttons: [{ title, url: "https://example.com" }] });
+      const body = JSON.parse(fetchMock.mock.calls.at(-1)![1].body);
+      const buttons = provider === "META" ? body.message.attachment.payload.buttons : body.buttons;
+      expect(buttons[0].title).toBe("a".repeat(19));
+    }
+    expect(fetchMock).toHaveBeenCalledTimes(3);
   });
   it("follows comment cursors and preserves owner replies", async () => {
     respond({

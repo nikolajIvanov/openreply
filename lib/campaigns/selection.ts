@@ -1,4 +1,5 @@
 import { matchKeywords } from "@/lib/utils/keyword-matcher";
+import { buttonLabelTooLong } from "@/lib/instagram/message-limits";
 
 export const CAMPAIGN_LIFECYCLES = ["DRAFT", "ACTIVE", "PAUSED", "ARCHIVED"] as const;
 export type CampaignLifecycle = (typeof CAMPAIGN_LIFECYCLES)[number];
@@ -49,7 +50,9 @@ export function campaignActivationErrors(c: {
   postId?: string | null; matchAnyPost?: boolean; pendingNextReel?: boolean;
   keywords: string[]; matchAnyWord: boolean; dmMessage: string;
   openingDmEnabled?: boolean; openingDmMessage?: string | null; openingDmButtonLabel?: string | null;
-  requireFollow?: boolean; followPromptMessage?: string | null;
+  requireFollow?: boolean; followPromptMessage?: string | null; followPromptButtonLabel?: string | null;
+  linkButtonLabel?: string | null; secondaryButtonLabel?: string | null;
+  trackedDestinationUrl?: string | null; secondaryDestinationUrl?: string | null;
   followUpEnabled?: boolean; followUpMessage?: string | null;
   publicReplyEnabled?: boolean; publicReplyMessage?: string | null; publicReplyMessages?: string[];
 }) {
@@ -59,6 +62,10 @@ export function campaignActivationErrors(c: {
   if (!c.matchAnyWord && !c.keywords.some((k) => k.trim())) errors.push("Add a keyword or choose any word.");
   if (!c.dmMessage.trim()) errors.push("Add the delivery message.");
   if (c.openingDmEnabled && (!c.openingDmMessage?.trim() || !c.openingDmButtonLabel?.trim())) errors.push("Opening DM needs a message and button label.");
+  if (c.openingDmEnabled && buttonLabelTooLong(c.openingDmButtonLabel)) errors.push("Opening DM button label must be at most 20 characters including spaces.");
+  if (c.requireFollow && buttonLabelTooLong(c.followPromptButtonLabel)) errors.push("Follow button label must be at most 20 characters including spaces.");
+  if (c.trackedDestinationUrl && buttonLabelTooLong(c.linkButtonLabel)) errors.push("Link button label must be at most 20 characters including spaces.");
+  if (c.secondaryDestinationUrl && buttonLabelTooLong(c.secondaryButtonLabel)) errors.push("Second link button label must be at most 20 characters including spaces.");
   if (c.requireFollow && !c.followPromptMessage?.trim()) errors.push("Follow gate needs a message.");
   if (c.followUpEnabled && !c.followUpMessage?.trim()) errors.push("Follow-up needs a message.");
   if (c.publicReplyEnabled && !c.publicReplyMessage?.trim() && !c.publicReplyMessages?.some((m) => m.trim())) errors.push("Public reply needs a message.");

@@ -5,7 +5,8 @@ import { getCurrentWorkspaceId } from "@/lib/auth";
 import { campaignActivationErrors, selectAutomation } from "@/lib/campaigns/selection";
 import { renderMessageWithTracking, renderMessageWithoutLink } from "@/lib/tracking/message";
 import { TRACKED_LINK_ORDER } from "@/lib/tracking/link-order";
-import { httpUrl } from "@/lib/library/schema";
+import { httpUrl, instagramButtonLabelSchema } from "@/lib/library/schema";
+import { buttonLabelTooLong, renderButtonLabel } from "@/lib/instagram/message-limits";
 
 const schema = z.object({
   instagramAccountId: z.string().min(1),
@@ -17,13 +18,13 @@ const schema = z.object({
     keywords: z.array(z.string().max(50)).max(10).default([]), excludedKeywords: z.array(z.string().max(50)).max(10).default([]),
     matchAnyWord: z.boolean().default(false), wholeWordMatch: z.boolean().default(true), dmTriggerEnabled: z.boolean().default(false),
     priority: z.number().int().min(-1000).max(1000).default(0), dmMessage: z.string().max(1000).default(""),
-    openingDmEnabled: z.boolean().default(false), openingDmMessage: z.string().max(1000).nullish(), openingDmButtonLabel: z.string().max(64).nullish(),
-    requireFollow: z.boolean().default(false), followPromptMessage: z.string().max(1000).nullish(),
+    openingDmEnabled: z.boolean().default(false), openingDmMessage: z.string().max(1000).nullish(), openingDmButtonLabel: instagramButtonLabelSchema.nullish(),
+    requireFollow: z.boolean().default(false), followPromptMessage: z.string().max(1000).nullish(), followPromptButtonLabel: instagramButtonLabelSchema.nullish(),
     followUpEnabled: z.boolean().default(false), followUpMessage: z.string().max(1000).nullish(),
     publicReplyEnabled: z.boolean().default(false), publicReplyMessage: z.string().max(1000).nullish(), publicReplyMessages: z.array(z.string().max(1000)).max(10).default([]),
     trackedDestinationUrl: z.union([httpUrl, z.literal("")]).nullish(),
     secondaryDestinationUrl: z.union([httpUrl, z.literal("")]).nullish(),
-    linkButtonLabel: z.string().max(20).nullish(), secondaryButtonLabel: z.string().max(20).nullish(),
+    linkButtonLabel: instagramButtonLabelSchema.nullish(), secondaryButtonLabel: instagramButtonLabelSchema.nullish(),
   }).optional(),
 });
 
@@ -55,10 +56,11 @@ export async function POST(request: NextRequest) {
   if (message && candidateNeedsPreviewLink && input.candidate?.trackedDestinationUrl) {
     message = message.replace(/\{link\}/gi, input.candidate.trackedDestinationUrl);
   }
-  const buttonLinks = winner ? winner.id === candidate?.id ? [
+  const rawButtonLinks = winner ? winner.id === candidate?.id ? [
     { label: input.candidate?.linkButtonLabel || "Open link", destinationUrl: input.candidate?.trackedDestinationUrl ?? original?.trackedLinks[0]?.destinationUrl },
     { label: input.candidate?.secondaryButtonLabel || "Open link", destinationUrl: input.candidate?.secondaryDestinationUrl ?? original?.trackedLinks[1]?.destinationUrl },
-  ].filter((link) => Boolean(link.destinationUrl)) : winner.trackedLinks.map((link, index) => ({ label: index === 0 ? "Open link" : link.label || "Open link", destinationUrl: link.destinationUrl })) : [];
+  ].filter((link) => Boolean(link.destinationUrl)) : winner.trackedLinks.map((link, index) => ({ label: index === 0 ? winner.linkButtonLabel || "Open link" : link.label || "Open link", destinationUrl: link.destinationUrl })) : [];
+  const buttonLinks = rawButtonLinks.map((link) => ({ ...link, label: renderButtonLabel(link.label) }));
   return NextResponse.json({ success: true, data: {
     errors: candidate ? campaignActivationErrors(candidate) : [],
     winner: winner ? { id: winner.id, name: winner.name, matchedKeyword: selection.matchedKeyword } : null,
@@ -69,6 +71,6 @@ export async function POST(request: NextRequest) {
     followGate: Boolean(winner?.requireFollow),
     followMessage: winner?.requireFollow && winner.followPromptMessage ? renderMessageWithoutLink({ message: winner.followPromptMessage, commenterName: input.username }) : null,
     followUpMessage: winner?.followUpEnabled && winner.followUpMessage ? renderMessageWithoutLink({ message: winner.followUpMessage, commenterName: input.username }) : null,
-    warnings: [candidate?.pendingNextReel ? "This campaign will only match after its next reel is bound." : null, candidateNeedsPreviewLink && /\{link\}/i.test(candidate!.dmMessage) ? "Preview uses the proposed destination, not a live tracking URL. Save first to create or update tracking links." : null, "Simulation checks local rules only, not Instagram permission or delivery."].filter(Boolean),
+    warnings: [rawButtonLinks.some((link) => buttonLabelTooLong(link.label)) ? "Overlong button labels are shortened to the send limit in this preview. Edit the campaign labels." : null, candidate?.pendingNextReel ? "This campaign will only match after its next reel is bound." : null, candidateNeedsPreviewLink && /\{link\}/i.test(candidate!.dmMessage) ? "Preview uses the proposed destination, not a live tracking URL. Save first to create or update tracking links." : null, "Simulation checks local rules only, not Instagram permission or delivery."].filter(Boolean),
   } });
 }

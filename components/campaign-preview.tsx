@@ -1,6 +1,7 @@
 "use client";
 
 import { useI18n } from "@/lib/i18n/provider";
+import { buttonLabelTooLong, renderButtonLabel } from "@/lib/instagram/message-limits";
 
 
 /* eslint-disable @next/next/no-img-element */
@@ -364,6 +365,9 @@ function DmScreen({
       </div>
 
       <div className="flex-1 space-y-3 px-3 py-4">
+        {((openingDmEnabled && buttonLabelTooLong(openingDmButtonLabel)) || (requireFollow && buttonLabelTooLong(followPromptButtonLabel)) || (hasLink && buttonLabelTooLong(linkButtonLabel)) || (hasSecondLink && buttonLabelTooLong(secondLinkButtonLabel))) && (
+          <p role="alert" className="rounded border border-amber-500/40 bg-amber-500/10 p-2 text-xs text-amber-300">{t("Overlong button labels are shortened in this preview, just as when sent. Edit the labels before saving.")}</p>
+        )}
         {inboundMessage !== undefined && (
           <div className="flex justify-end">
             <div className="max-w-[80%] rounded-2xl rounded-br-md bg-accent px-3 py-2 text-sm">
@@ -378,13 +382,13 @@ function DmScreen({
               <div className="max-w-[80%] overflow-hidden rounded-2xl rounded-bl-md bg-zinc-800">
                 <p className="whitespace-pre-wrap px-3 py-2 text-sm">{openingDmMessage || t("Your opening message…")}</p>
                 <div className="mx-1.5 mb-1.5 rounded-xl bg-zinc-700 px-4 py-1.5 text-center text-sm font-medium text-white">
-                  {openingDmButtonLabel || t("Button label")}
+                  {renderButtonLabel(openingDmButtonLabel || t("Button label"))}
                 </div>
               </div>
             </div>
             <div className="flex justify-end">
               <div className="rounded-2xl rounded-br-md bg-accent px-3 py-2 text-sm">
-                {openingDmButtonLabel || t("Button label")}
+                {renderButtonLabel(openingDmButtonLabel || t("Button label"))}
               </div>
             </div>
           </>
@@ -399,13 +403,13 @@ function DmScreen({
                     "quick favor before i send your link. i don't make any money from this, it's free. if you want to support me, just don't unfollow after, and star the repo on github if it helps you. tap the button once you're following and i'll send it over"}
                 </p>
                 <div className="mx-1.5 mb-1.5 rounded-xl bg-zinc-700 px-4 py-1.5 text-center text-sm font-medium text-white">
-                  {followPromptButtonLabel || "i'm following"}
+                  {renderButtonLabel(followPromptButtonLabel || "i'm following")}
                 </div>
               </div>
             </div>
             <div className="flex justify-end">
               <div className="rounded-2xl rounded-br-md bg-accent px-3 py-2 text-sm">
-                {followPromptButtonLabel || "i'm following"}
+                {renderButtonLabel(followPromptButtonLabel || "i'm following")}
               </div>
             </div>
           </>
@@ -433,11 +437,11 @@ function DmScreen({
                 {showCard && (
                   <>
                     <div className="mx-1.5 mb-1.5 rounded-xl bg-zinc-700 px-4 py-1.5 text-center text-sm font-medium text-white">
-                      {linkButtonLabel || "Open link"}
+                      {renderButtonLabel(linkButtonLabel || "Open link")}
                     </div>
                     {hasSecondLink && (
                       <div className="mx-1.5 mb-1.5 rounded-xl bg-zinc-700 px-4 py-1.5 text-center text-sm font-medium text-white">
-                        {secondLinkButtonLabel || "Open link"}
+                        {renderButtonLabel(secondLinkButtonLabel || "Open link")}
                       </div>
                     )}
                   </>

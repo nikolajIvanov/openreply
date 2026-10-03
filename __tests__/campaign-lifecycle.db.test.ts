@@ -82,6 +82,62 @@ describe.skipIf(!DATABASE_URL)("campaign lifecycle on real PostgreSQL", () => {
     expect(accepted.status).toBe(200);
     expect((await accepted.json()).data).toMatchObject({ lifecycle: "ACTIVE", isActive: true, version: 2 });
   });
+  it.each(["openingDmButtonLabel", "followPromptButtonLabel", "linkButtonLabel", "secondaryButtonLabel"])("rejects overlong %s on create/update without persisting it", async (field) => {
+    expect((await create({ ...complete, lifecycle: "DRAFT", [field]: "a".repeat(21) })).response.status).toBe(400);
+    const { response, payload } = await create({ ...complete, lifecycle: "DRAFT", openingDmEnabled: true, openingDmMessage: "Hi", requireFollow: true, followPromptMessage: "Follow", secondaryDestinationUrl: "https://example.com/second", [field]: "a".repeat(20) });
+    expect(response.status).toBe(201);
+    const original = await state.db.automation.findUniqueOrThrow({ where: { id: payload.data.id } });
+    if (field === "secondaryButtonLabel") expect((await state.db.trackedLink.findFirstOrThrow({ where: { automationId: original.id, position: 1 } })).label).toBe("a".repeat(20));
+    else expect(Reflect.get(original, field)).toBe("a".repeat(20));
+    const rejected = await PATCH(request("PATCH", { [field]: "a".repeat(21) }, payload.data.id));
+    expect(rejected.status).toBe(400);
+    const saved = await state.db.automation.findUniqueOrThrow({ where: { id: payload.data.id } });
+    expect(saved.version).toBe(1);
+  });
+  it("can pause/archive legacy overlong opening labels without rewriting them; activation needs correction", async () => {
+    const { payload } = await create({ ...complete, openingDmEnabled: true, openingDmMessage: "Hi", openingDmButtonLabel: "Send links" });
+    const label = "Ja, schick mir die Links";
+    await state.db.automation.update({ where: { id: payload.data.id }, data: { openingDmButtonLabel: label } });
+    expect((await PATCH(request("PATCH", { lifecycle: "PAUSED" }, payload.data.id))).status).toBe(200);
+    expect((await PATCH(request("PATCH", { lifecycle: "ACTIVE" }, payload.data.id))).status).toBe(400);
+    expect((await state.db.automation.findUniqueOrThrow({ where: { id: payload.data.id } })).openingDmButtonLabel).toBe(label);
+    expect((await PATCH(request("PATCH", { lifecycle: "ACTIVE", openingDmEnabled: false }, payload.data.id))).status).toBe(200);
+    expect((await PATCH(request("PATCH", { lifecycle: "ARCHIVED" }, payload.data.id))).status).toBe(200);
+  });
+  it.each(["openingDmButtonLabel", "followPromptButtonLabel", "linkButtonLabel", "secondaryButtonLabel"])("rejects overlong %s through simulation and MCP without new campaign rows", async (field) => {
+    const before = await state.db.automation.count();
+    const candidate = { name: "Draft", matchAnyPost: true, keywords: ["LINK"], dmMessage: "Hi", [field]: "a".repeat(21) };
+    const result = await simulate(request("POST", { instagramAccountId: "account", kind: "comment", text: "LINK", candidate }));
+    expect(result.status).toBe(400);
+    await expect(callTool({ workspaceId: "ws", keyId: "test", scopes: ["drafts:write"] }, "create_draft", { ...candidate, instagramAccountId: "account", idempotencyKey: `overlong-${field}` })).rejects.toMatchObject({ status: 400 });
+    expect(await state.db.automation.count()).toBe(before);
+  });
+  it("validates existing link titles on activation, including unchanged secondary relations", async () => {
+    const { payload } = await create({ ...complete, lifecycle: "DRAFT", secondaryDestinationUrl: "https://example.com/second", secondaryButtonLabel: "Second" });
+    await state.db.automation.update({ where: { id: payload.data.id }, data: { linkButtonLabel: "a".repeat(21) } });
+    expect((await PATCH(request("PATCH", { lifecycle: "ACTIVE" }, payload.data.id))).status).toBe(400);
+    await state.db.automation.update({ where: { id: payload.data.id }, data: { linkButtonLabel: "Open" } });
+    await state.db.trackedLink.updateMany({ where: { automationId: payload.data.id, position: 1 }, data: { label: "a".repeat(21) } });
+    expect((await PATCH(request("PATCH", { lifecycle: "ACTIVE" }, payload.data.id))).status).toBe(400);
+    const before = await state.db.automation.findUniqueOrThrow({ where: { id: payload.data.id } });
+    expect((await PATCH(request("PATCH", { lifecycle: "ACTIVE", secondaryButtonLabel: "Second" }, payload.data.id))).status).toBe(400);
+    const after = await state.db.automation.findUniqueOrThrow({ where: { id: payload.data.id } });
+    expect(after.version).toBe(before.version);
+    expect(after.isActive).toBe(false);
+    expect((await PATCH(request("PATCH", { lifecycle: "ACTIVE", secondaryDestinationUrl: "https://example.com/second", secondaryButtonLabel: "Second" }, payload.data.id))).status).toBe(200);
+  });
+  it("simulates the actual primary title and safe secondary fallback without changing stored values", async () => {
+    const { payload } = await create({ ...complete, keywords: ["LABELSIM"], linkButtonLabel: "My resource", secondaryDestinationUrl: "https://example.com/second", secondaryButtonLabel: "Second" });
+    const label = "a".repeat(19) + "😀 longer";
+    await state.db.trackedLink.updateMany({ where: { automationId: payload.data.id, position: 1 }, data: { label } });
+    const response = await simulate(request("POST", { instagramAccountId: "account", kind: "comment", text: "LABELSIM" }));
+    expect(response.status).toBe(200);
+    const { data } = await response.json();
+    expect(data.winner.id).toBe(payload.data.id);
+    expect(data.buttonLinks.map((link: { label: string }) => link.label)).toEqual(["My resource", "a".repeat(19)]);
+    expect(data.warnings.join(" ")).toContain("Overlong button labels");
+    expect((await state.db.trackedLink.findFirstOrThrow({ where: { automationId: payload.data.id, position: 1 } })).label).toBe(label);
+  });
   it("serializes concurrent create/activation: exactly one armed reel", async () => {
     const waiting = { ...complete, matchAnyPost: false, pendingNextReel: true };
     const results = await Promise.all([create(waiting), create(waiting), create(waiting)]);

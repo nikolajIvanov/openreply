@@ -18,6 +18,8 @@ import { useRouter } from "next/navigation";
 import AccountSelect, { type AccountOption } from "@/components/account-select";
 import PostPicker from "@/components/post-picker";
 import CampaignPreview, { type PreviewTab } from "@/components/campaign-preview";
+import ButtonLabelInput from "@/components/button-label-input";
+import { buttonLabelTooLong } from "@/lib/instagram/message-limits";
 import { readCache, writeCache } from "@/lib/client-cache";
 import { campaignLifecycle, type CampaignLifecycle } from "@/lib/campaigns/selection";
 import {
@@ -417,6 +419,8 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
     if (activeValue && !dmMessage.trim()) return setError(t("Add the DM with the link."));
     if (activeValue && openingDmEnabled && (!openingDmMessage.trim() || !openingDmButtonLabel.trim()))
       return setError(t("Your opening DM needs a message and a button label."));
+    if ([openingDmEnabled ? openingDmButtonLabel : "", requireFollow ? followPromptButtonLabel : "", linkButtonLabel, secondaryButtonLabel].some(buttonLabelTooLong))
+      return setError(t("Button labels must be at most 20 characters including spaces. Shorten the highlighted labels before saving."));
 
     setSaving(true);
 
@@ -537,7 +541,7 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
     try {
       const response = await fetch("/api/automations/validate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
         instagramAccountId: selectedAccountId, text: simulationText, kind: simulationKind, mediaId: postId ?? undefined,
-        candidate: { id: campaignId, name: name || "Unsaved draft", postId, matchAnyPost: triggerScope === "any", pendingNextReel: triggerScope === "next", keywords, excludedKeywords: excludedKeywordText.split(",").map((word) => word.trim()).filter(Boolean), priority, matchAnyWord: matchMode === "any", wholeWordMatch, dmTriggerEnabled, dmMessage, openingDmEnabled, openingDmMessage, openingDmButtonLabel, requireFollow, followPromptMessage, followUpEnabled, followUpMessage, publicReplyEnabled, publicReplyMessages, trackedDestinationUrl, secondaryDestinationUrl, linkButtonLabel, secondaryButtonLabel },
+        candidate: { id: campaignId, name: name || "Unsaved draft", postId, matchAnyPost: triggerScope === "any", pendingNextReel: triggerScope === "next", keywords, excludedKeywords: excludedKeywordText.split(",").map((word) => word.trim()).filter(Boolean), priority, matchAnyWord: matchMode === "any", wholeWordMatch, dmTriggerEnabled, dmMessage, openingDmEnabled, openingDmMessage, openingDmButtonLabel: openingDmEnabled ? openingDmButtonLabel : null, requireFollow, followPromptMessage, followPromptButtonLabel: requireFollow ? followPromptButtonLabel : null, followUpEnabled, followUpMessage, publicReplyEnabled, publicReplyMessages, trackedDestinationUrl, secondaryDestinationUrl, linkButtonLabel, secondaryButtonLabel },
       }) });
       const data = await response.json();
       if (!data.success) throw new Error(data.error || "Simulation failed");
@@ -899,12 +903,10 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
                   className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-zinc-500 focus:border-accent/40 focus:outline-none resize-none"
                   maxLength={1000}
                 />
-                <input
+                <ButtonLabelInput
                   value={openingDmButtonLabel}
-                  onChange={(e) => setOpeningDmButtonLabel(e.target.value)}
+                  onChange={setOpeningDmButtonLabel}
                   placeholder={t("Send me the link")}
-                  className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-zinc-500 focus:border-accent/40 focus:outline-none"
-                  maxLength={64}
                 />
               </div>
             )}
@@ -929,12 +931,10 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
                   className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-zinc-500 focus:border-accent/40 focus:outline-none resize-none"
                   maxLength={1000}
                 />
-                <input
+                <ButtonLabelInput
                   value={followPromptButtonLabel}
-                  onChange={(e) => setFollowPromptButtonLabel(e.target.value)}
+                  onChange={setFollowPromptButtonLabel}
                   placeholder={t("i'm following")}
-                  className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-zinc-500 focus:border-accent/40 focus:outline-none"
-                  maxLength={20}
                 />
                 <p className="text-xs text-muted">
                   {t("We send the link only after they tap the button and Instagram confirms the follow. If it can't be verified, we send it anyway.")}
@@ -964,12 +964,10 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
                   placeholder="https://yourlink.com/offer"
                   className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-zinc-500 focus:border-accent/40 focus:outline-none"
                 />
-                <input
+                <ButtonLabelInput
                   value={linkButtonLabel}
-                  onChange={(e) => setLinkButtonLabel(e.target.value)}
+                  onChange={setLinkButtonLabel}
                   placeholder={t("Button label (e.g. Open link)")}
-                  maxLength={20}
-                  className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-zinc-500 focus:border-accent/40 focus:outline-none"
                 />
                 {secondLinkOpen ? (
                   <div className="space-y-2 border-t border-border pt-2">
@@ -979,12 +977,10 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
                       placeholder="https://yourlink.com/second"
                       className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-zinc-500 focus:border-accent/40 focus:outline-none"
                     />
-                    <input
+                    <ButtonLabelInput
                       value={secondaryButtonLabel}
-                      onChange={(e) => setSecondaryButtonLabel(e.target.value)}
+                      onChange={setSecondaryButtonLabel}
                       placeholder={t("Second button label")}
-                      maxLength={20}
-                      className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-zinc-500 focus:border-accent/40 focus:outline-none"
                     />
                   </div>
                 ) : (

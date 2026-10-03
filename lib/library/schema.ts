@@ -1,4 +1,7 @@
 import { z } from "zod";
+import { INSTAGRAM_BUTTON_LABEL_LIMIT } from "@/lib/instagram/message-limits";
+
+export const instagramButtonLabelSchema = z.string().max(INSTAGRAM_BUTTON_LABEL_LIMIT, "Instagram button labels must be at most 20 characters including spaces.");
 
 export const httpUrl = z.string().url().refine((value) => {
   try {
@@ -20,11 +23,11 @@ export const contentSchema = z.object({
   dmMessage: z.string().max(1000).default(""),
   openingDmEnabled: z.boolean().default(false),
   openingDmMessage: z.string().max(1000).nullable().optional(),
-  openingDmButtonLabel: z.string().max(64).nullable().optional(),
-  linkButtonLabel: z.string().max(20).nullable().optional(),
+  openingDmButtonLabel: instagramButtonLabelSchema.nullable().optional(),
+  linkButtonLabel: instagramButtonLabelSchema.nullable().optional(),
   requireFollow: z.boolean().default(false),
   followPromptMessage: z.string().max(1000).nullable().optional(),
-  followPromptButtonLabel: z.string().max(20).nullable().optional(),
+  followPromptButtonLabel: instagramButtonLabelSchema.nullable().optional(),
   followUpEnabled: z.boolean().default(false),
   followUpMessage: z.string().max(1000).nullable().optional(),
   followUpDelayMinutes: z.number().int().min(0).max(1440).default(0),
@@ -33,12 +36,12 @@ export const contentSchema = z.object({
   publicReplyMessages: z.array(z.string().max(1000)).max(10).default([]),
   trackedDestinationUrl: httpUrl.or(z.literal("")).nullable().optional(),
   secondaryDestinationUrl: httpUrl.or(z.literal("")).nullable().optional(),
-  secondaryButtonLabel: z.string().max(20).nullable().optional(),
+  secondaryButtonLabel: instagramButtonLabelSchema.nullable().optional(),
 });
 export const resourceSchema = z.object({
   description: z.string().max(2000).default(""),
   destinationUrl: httpUrl,
   dmMessage: z.string().max(1000).default(""),
-  linkButtonLabel: z.string().max(20).default("Inhalt öffnen"),
+  linkButtonLabel: instagramButtonLabelSchema.default("Inhalt öffnen"),
   category: z.enum(["CREATOR", "COMPANY", "CLIENT"]).default("CREATOR"),
 });
