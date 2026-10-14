@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/db/client";
+import { getClickMetrics } from "@/lib/tracking/queries";
 import type { Locale } from "@/lib/i18n";
 import {
   calculateCtr,
@@ -70,7 +71,7 @@ export async function getCampaignReportBySlug(shareSlug: string, locale: Locale 
     return null;
   }
 
-  const [statusRows, clickCount, keywordRows, latestSentLog] =
+  const [statusRows, clickCount, keywordRows, latestSentLog, deduplicatedCounts, deduplicatedLinkCounts] =
     await Promise.all([
       prisma.dmLog.groupBy({
         by: ["status"],
@@ -104,6 +105,8 @@ export async function getCampaignReportBySlug(shareSlug: string, locale: Locale 
         orderBy: { dmSentAt: "desc" },
         select: { dmSentAt: true, createdAt: true },
       }),
+      getClickMetrics({ workspaceId: automation.workspaceId, automationId: automation.id }),
+      getClickMetrics({ workspaceId: automation.workspaceId, automationId: automation.id }, "link"),
     ]);
 
   const statusSummary = summarizeDmStatuses(
@@ -174,6 +177,7 @@ export async function getCampaignReportBySlug(shareSlug: string, locale: Locale 
       skipped: statusSummary.skipped,
       failed: statusSummary.failed,
       clicks: clickCount,
+      deduplicatedClicks: deduplicatedCounts[0]?.deduplicatedClicks ?? 0,
       ctr: calculateCtr(clickCount, statusSummary.sent),
       latestSentAt: latestSentLog?.dmSentAt ?? latestSentLog?.createdAt ?? null,
     },
@@ -183,6 +187,7 @@ export async function getCampaignReportBySlug(shareSlug: string, locale: Locale 
       slug: link.slug,
       destinationHost: getHostname(link.destinationUrl),
       clicks: link._count.clicks,
+      deduplicatedClicks: deduplicatedLinkCounts.find(row => row.key === link.id)?.deduplicatedClicks ?? 0,
     })),
   };
 }

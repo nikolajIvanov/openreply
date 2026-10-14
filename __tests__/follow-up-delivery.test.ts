@@ -11,6 +11,7 @@ vi.mock("@/lib/instagram/provider", () => ({
 vi.mock("@/lib/queue/client", () => ({ FOLLOWUP_JOB_NAME: "process-followup", getDMQueue: () => ({ add: mocks.queue }) }));
 import { scheduleFollowUp, deliverFollowUp, recoverPendingFollowUps } from "@/lib/queue/follow-up-delivery";
 import { MetaApiError } from "@/lib/meta/client";
+import { createRecipientToken } from "@/lib/tracking/server";
 
 const now = new Date("2026-10-03T09:00:00Z");
 const campaign = {
@@ -36,12 +37,30 @@ beforeEach(() => {
   });
   mocks.prisma.deliveryEvent.update.mockImplementation(async ({ data }: { data: Record<string, unknown> }) => { stored = { ...stored, ...data }; return stored; });
 });
-afterEach(() => vi.useRealTimers());
+afterEach(() => { vi.useRealTimers(); vi.unstubAllEnvs(); });
 async function prepare() {
   await scheduleFollowUp(campaign, { userId: "recipient", commenterName: "Maya", sourceId: "tap", interactionAt: now });
   vi.setSystemTime(new Date(now.getTime() + 5 * 60_000));
 }
 describe("durable immutable follow-up delivery", () => {
+  it("only personalizes known own URLs in new snapshots, retaining them after secret and content changes", async () => {
+    vi.stubEnv("NEXTAUTH_SECRET", "local-followup-tracking-secret");
+    vi.stubEnv("NEXTAUTH_URL", "https://example.test");
+    const token = createRecipientToken("recipient", "campaign")!;
+    await scheduleFollowUp({ ...campaign,
+      followUpMessage: "Thanks {username}! https://example.test/r/resource?x=1#section https://external.test/r/resource {link}",
+      trackedLinks: [{ slug: "resource", destinationUrl: "https://example.com/resource" }],
+    }, { userId: "recipient", commenterName: "Maya", sourceId: "tap", interactionAt: now });
+    expect(stored.message).toBe(`Thanks Maya! https://example.test/r/resource?x=1&r=${token}#section https://external.test/r/resource`);
+    const original = stored.message;
+    vi.stubEnv("NEXTAUTH_SECRET", "changed-followup-tracking-secret");
+    await scheduleFollowUp({ ...campaign, followUpMessage: "Changed" }, { userId: "recipient", commenterName: "Maya", sourceId: "tap", interactionAt: now });
+    expect(stored.message).toBe(original);
+    vi.setSystemTime(new Date(now.getTime() + 5 * 60_000));
+    await deliverFollowUp(data, "job");
+    expect(mocks.send).toHaveBeenCalledWith(expect.objectContaining({ message: original }));
+    expect(stored.status).toBe("SENT");
+  });
   it("snapshots rendered text and version and ignores subsequent text edits", async () => {
     await prepare();
     mocks.prisma.automation.findFirst.mockResolvedValue({ ...campaign, followUpMessage: "Changed", version: 5 });

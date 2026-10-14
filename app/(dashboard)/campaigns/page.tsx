@@ -60,6 +60,7 @@ interface Campaign {
     skipped: number;
     failed: number;
     clicks: number;
+    deduplicatedClicks: number;
     ctr: number;
     topKeywords: { keyword: string; count: number }[];
   };
@@ -496,6 +497,9 @@ export default function CampaignsPage() {
                   <span>{auto.analytics.failed} {t("failed")}</span>
                   <span>·</span>
                   <span>{auto.analytics.clicks} {t("clicks")}</span>
+                  <span title={t("Recipient tokens or IP fallback; not verified people or conversions.")}>
+                    · {auto.analytics.deduplicatedClicks ?? 0} {t("Deduplicated clicks")}
+                  </span>
                 </div>
 
                 {auto.analytics.topKeywords.length > 0 && (

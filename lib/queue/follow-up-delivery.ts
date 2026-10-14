@@ -4,13 +4,15 @@ import { prisma } from "@/lib/db/client";
 import { campaignCanSend } from "@/lib/campaigns/selection";
 import { classifySendError, isConfirmedSendRejection } from "@/lib/instagram/delivery-errors";
 import { createInstagramContext, hasInstagramCredentials, sendDirectMessage } from "@/lib/instagram/provider";
-import { renderMessageWithoutLink } from "@/lib/tracking/message";
+import { personalizeExistingTrackedUrls, renderMessageWithoutLink, type MessageTrackedLink } from "@/lib/tracking/message";
+import { createRecipientToken } from "@/lib/tracking/server";
 import { FOLLOWUP_JOB_NAME, getDMQueue, type ProcessFollowUpJob } from "./client";
 
 type FollowUpCampaign = {
   id: string; workspaceId: string; instagramAccountId: string; version: number;
   followUpEnabled: boolean; followUpMessage: string | null; followUpDelayMinutes: number;
   instagramAccount: { instagramId: string };
+  trackedLinks?: MessageTrackedLink[];
 };
 /** Snapshot is persisted before queue insertion. A failed queue insertion is
  * repaired by recoverPendingFollowUps, without altering a delivered reveal. */
@@ -32,7 +34,10 @@ export async function scheduleFollowUp(campaign: FollowUpCampaign, input: {
       instagramAccountId: campaign.instagramAccountId,
       stage: "FOLLOW_UP", operationKey, campaignVersion: campaign.version,
       recipientId: input.userId, scheduledAt,
-      message: renderMessageWithoutLink({ message: campaign.followUpMessage, commenterName: input.commenterName }),
+      message: personalizeExistingTrackedUrls(
+        renderMessageWithoutLink({ message: campaign.followUpMessage, commenterName: input.commenterName }),
+        campaign.trackedLinks ?? [], createRecipientToken(input.userId, campaign.id),
+      ),
       status: !validAnchor || scheduledAt >= expiresAt || Date.now() >= expiresAt.getTime() ? "SKIPPED" : "PENDING",
       error: !validAnchor ? "Missing known interaction timestamp" : scheduledAt >= expiresAt || Date.now() >= expiresAt.getTime() ? "Outside the known messaging window" : null,
       payload: { instagramId: campaign.instagramAccount.instagramId, expiresAt: expiresAt.toISOString() },

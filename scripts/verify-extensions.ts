@@ -7,6 +7,7 @@ import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "../app/generated/prisma/client";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { createRecipientToken, parseRecipientToken } from "../lib/tracking/server";
 
 async function main() {
   const dbUrl = process.env.TEST_DATABASE_URL ?? "";
@@ -96,6 +97,34 @@ async function main() {
     const content = mcpDetail.content as Array<{ type: string; text?: string }>;
     assert.deepEqual(JSON.parse(content[0].text!), detail);
     const mcpDraft = await client.callTool({ name: "create_draft", arguments: { ...draft, idempotencyKey: `mcp-${suffix}` } }); assert.ok(!mcpDraft.isError);
+    const trackedLink = await db.trackedLink.findFirstOrThrow({ where: { automationId: stored.id }, orderBy: { position: "asc" } });
+    const recipientToken = createRecipientToken(`local-recipient-${suffix}`, stored.id);
+    assert.ok(recipientToken, "Matching local NEXTAUTH_SECRET is required for tracking acceptance");
+    const wrongCampaignToken = createRecipientToken(`local-recipient-${suffix}`, "foreign-campaign");
+    for (const attribution of [recipientToken, recipientToken, "v1." + "a".repeat(22) + "." + "b".repeat(22), wrongCampaignToken]) {
+      const response = await fetch(base + `/r/${trackedLink.slug}?r=${attribution}`, { redirect: "manual", headers: { "x-forwarded-for": "203.0.113.34" } });
+      assert.equal(response.status, 302); assert.equal(response.headers.get("location"), trackedLink.destinationUrl);
+      assert.equal(response.headers.get("cache-control"), "no-store"); assert.equal(response.headers.get("referrer-policy"), "no-referrer");
+    }
+    const clicks = await db.linkClick.findMany({ where: { automationId: stored.id }, orderBy: { createdAt: "asc" } });
+    assert.equal(clicks.length, 4);
+    assert.equal(clicks.filter(row => row.recipientHash === parseRecipientToken(recipientToken, stored.id)).length, 2);
+    assert.equal(clicks.filter(row => row.recipientHash === null).length, 2);
+    const dashboardResponse = await session("/api/dashboard/stats"); assert.equal(dashboardResponse.status, 200);
+    const dashboardData = (await dashboardResponse.json()).data;
+    assert.equal(dashboardData.totalClicks, 4); assert.equal(dashboardData.totalDeduplicatedClicks, 2);
+    const campaignList = await session("/api/automations"); assert.equal(campaignList.status, 200);
+    const analytics = (await campaignList.json()).data.find((row: { id: string }) => row.id === stored.id).analytics;
+    assert.equal(analytics.clicks, 4); assert.equal(analytics.deduplicatedClicks, 2);
+    const mcpStats = await client.callTool({ name: "get_campaign_stats", arguments: { id: stored.id } });
+    assert.ok(!mcpStats.isError);
+    assert.equal(JSON.parse((mcpStats.content as Array<{ text: string }>)[0].text).rawClicks, 4);
+    const foreignDashboard = await session("/api/dashboard/stats", undefined, second.cookie);
+    assert.equal((await foreignDashboard.json()).data.totalClicks, 0);
+    const localReport = await db.automation.update({ where: { id: stored.id }, data: { reportShareEnabled: true }, select: { reportShareSlug: true } });
+    const reportResponse = await fetch(base + `/reports/${localReport.reportShareSlug}`);
+    assert.equal(reportResponse.status, 200);
+    const reportHtml = await reportResponse.text(); assert.ok(reportHtml.includes("Deduplicated clicks"));
     const patch = (input: unknown, authorization = headers.Authorization) => fetch(base + "/api/v1/campaigns", {
       method: "PATCH", headers: { ...headers, Authorization: authorization }, body: JSON.stringify(input),
     });
@@ -127,7 +156,7 @@ async function main() {
     await db.serviceKey.update({ where: { id: key.id }, data: { revokedAt: new Date() } });
     assert.equal((await fetch(base + "/api/v1/campaigns", { headers })).status, 401);
     assert.equal((await patch({ id: stored.id, expectedVersion: 3, changes: { name: "Revoked" } })).status, 401);
-    console.log("PASS: actual HTTP sessions/scopes/workspace isolation, 30/60/90-day keys and unchanged existing keys, bounded JSON, concurrent draft dedupe, safe API/MCP details, version-guarded REST/MCP draft updates and history, conversions, official MCP initialize/list/call, key revocation; no Meta send.");
+    console.log("PASS: actual HTTP sessions/scopes/workspace isolation, 30/60/90-day keys, bounded JSON, draft dedupe and version-guarded REST/MCP updates, signed recipient redirects and additive deduplicated metrics with unchanged MCP raw clicks, conversions, official MCP initialize/list/call, key revocation; no Meta send.");
   } finally {
     await client?.close();
     // Only exact user IDs created by this run in the guarded disposable DB.

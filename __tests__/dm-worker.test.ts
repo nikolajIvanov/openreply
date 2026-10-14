@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { createRecipientToken, parseRecipientToken } from "@/lib/tracking/server";
 
 const {
   mockPrisma,
@@ -297,6 +298,57 @@ beforeEach(() => {
     message_id: "msg_006",
   });
   mockGetUserFollowStatus.mockResolvedValue(true);
+});
+
+describe("DM Worker — signed recipient tracking", () => {
+  beforeEach(() => {
+    vi.stubEnv("NEXTAUTH_SECRET", "local-worker-tracking-secret");
+    vi.stubEnv("NEXTAUTH_URL", "https://example.test");
+  });
+  afterEach(() => vi.unstubAllEnvs());
+  const campaign = { ...mockAutomation, lifecycle: "ACTIVE", version: 1, linkButtonLabel: "Open resource", dmMessage: "Here {link}", trackedLinks: [
+    { slug: "one", label: "Primary", destinationUrl: "https://example.com/one" },
+    { slug: "two", label: "Second", destinationUrl: "https://example.com/two" },
+  ] };
+  it.each(["comment", "postback", "message"])("adds the same valid token to both links through %s", async (kind) => {
+    mockPrisma.automation.findMany.mockResolvedValue([{ ...campaign, dmTriggerEnabled: true }]);
+    mockPrisma.automation.findFirst.mockResolvedValue(campaign);
+    const processor = getProcessor();
+    const job = kind === "comment" ? createMockJob() : kind === "postback" ? createMockPostbackJob() : {
+      name: "process-message", id: "message", attemptsMade: 0,
+      data: { instagramAccountId: "ig_456", messageId: "inbound", messageText: "LINK", senderId: "commenter_999" },
+    };
+    await processor(job);
+    const call = (kind === "comment" ? mockSendPrivateReplyWithLinkButton : mockSendDirectMessageWithLinkButton).mock.calls[0];
+    expect(call).toBeDefined();
+    const buttons = call[4] as { title: string; url: string }[];
+    const token = createRecipientToken("commenter_999", campaign.id)!;
+    expect(buttons.map(button => new URL(button.url).searchParams.get("r"))).toEqual([token, token]);
+    expect(buttons.map(button => button.title)).toEqual(["Open resource", "Second"]);
+    expect(parseRecipientToken(token, campaign.id)).not.toBeNull();
+    expect(mockPrisma.postbackDelivery.delete).not.toHaveBeenCalled();
+  });
+  it("retains attribution in the explicit template-rejection inline fallback", async () => {
+    mockPrisma.automation.findMany.mockResolvedValue([campaign]);
+    mockSendPrivateReplyWithLinkButton.mockRejectedValueOnce(new MetaApiError(100, undefined, undefined, "Invalid button template"));
+    await getProcessor()(createMockJob());
+    const text = mockSendPrivateReply.mock.calls[0][3] as string;
+    const urls = text.match(/https?:\/\/\S+/g)!;
+    expect(urls).toHaveLength(2);
+    expect(urls.map(url => new URL(url).searchParams.get("r"))).toEqual([
+      createRecipientToken("commenter_999", campaign.id), createRecipientToken("commenter_999", campaign.id),
+    ]);
+  });
+  it("drops attribution from long inline fallbacks without losing text or either link", async () => {
+    const long = { ...campaign, dmMessage: "x".repeat(900) + " {link}" };
+    mockPrisma.automation.findMany.mockResolvedValue([long]);
+    mockSendPrivateReplyWithLinkButton.mockRejectedValueOnce(new MetaApiError(100, undefined, undefined, "Invalid button template"));
+    await getProcessor()(createMockJob());
+    const text = mockSendPrivateReply.mock.calls[0][3] as string;
+    expect(text).toBe("x".repeat(900) + " https://example.test/r/one\nhttps://example.test/r/two");
+    expect(text.length).toBeLessThanOrEqual(1000);
+    expect(text).not.toContain("?r=");
+  });
 });
 
 describe("DM Worker — comments left on an ad", () => {

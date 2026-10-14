@@ -67,6 +67,8 @@
   "Check your email": "請查看電子郵件",
   "Check your email - OpenReply": "請查看電子郵件 - OpenReply",
   "Clicks": "連結點擊",
+  "Deduplicated clicks": "去重點擊",
+  "Recipient tokens or IP fallback; not verified people or conversions.": "依收件者權杖或 IP 去重；並非已驗證的人數或轉換數。",
   "Clicks divided by sent replies.": "連結點擊次數除以已傳送私訊數。",
   "Client campaign report": "活動成效報表",
   "Clone it yourself": "自行部署",

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUserId, getCurrentWorkspaceId } from "@/lib/auth";
 import { prisma } from "@/lib/db/client";
+import { getClickMetrics } from "@/lib/tracking/queries";
 import {
   calculateCtr,
   normalizeTopKeywords,
@@ -50,6 +51,8 @@ export async function GET(request: NextRequest) {
     recentLogs,
     user,
     contactRows,
+    deduplicatedMonthly,
+    deduplicatedTotal,
   ] = await Promise.all([
     prisma.workspace.findUnique({
       where: { id: workspaceId },
@@ -149,6 +152,8 @@ export async function GET(request: NextRequest) {
       distinct: ["commenterId"],
       select: { commenterId: true },
     }),
+    getClickMetrics({ workspaceId, ...accountFilter, from: monthStart }),
+    getClickMetrics({ workspaceId, ...accountFilter }),
   ]);
 
   const dailyDMs: { date: string; count: number }[] = [];
@@ -210,6 +215,8 @@ export async function GET(request: NextRequest) {
       totalDMs,
       clicksThisMonth,
       totalClicks,
+      deduplicatedClicksThisMonth: deduplicatedMonthly[0]?.deduplicatedClicks ?? 0,
+      totalDeduplicatedClicks: deduplicatedTotal[0]?.deduplicatedClicks ?? 0,
       ctrThisMonth: calculateCtr(clicksThisMonth, dmsSentMonth),
       topKeywords,
       dailyDMs,

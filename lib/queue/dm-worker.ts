@@ -49,8 +49,10 @@ import {
   buildTrackedUrl,
   renderMessageWithTracking,
   renderMessageWithoutLink,
+  RECIPIENT_TEXT_BUDGET,
 } from "@/lib/tracking/message";
 import { TRACKED_LINK_ORDER } from "@/lib/tracking/link-order";
+import { createRecipientToken } from "@/lib/tracking/server";
 import { selectTriggerWinner } from "./trigger-selection";
 import { scheduleFollowUp, deliverFollowUp } from "./follow-up-delivery";
 import { recordDeliveryResult, deliveryOperationKey } from "./delivery-result";
@@ -151,10 +153,11 @@ type WorkerTrackedLink = {
  */
 function buildLinkButtons(
   trackedLinks: WorkerTrackedLink[],
-  primaryLabel: string | null
+  primaryLabel: string | null,
+  recipientToken?: string
 ): { title: string; url: string }[] {
   return trackedLinks.slice(0, 3).map((link, index) => ({
-    url: buildTrackedUrl(link.slug),
+    url: buildTrackedUrl(link.slug, undefined, recipientToken),
     title:
       (index === 0 ? primaryLabel : link.label) || link.label || "Open link",
   }));
@@ -169,18 +172,23 @@ function buildInlineLinkFallback(
   message: string,
   commenterName: string | null | undefined,
   trackedLinks: WorkerTrackedLink[],
-  bodyText: string
+  bodyText: string,
+  recipientToken?: string
 ): string {
   const base =
-    renderMessageWithTracking({ message, commenterName, trackedLinks }) ||
+    renderMessageWithTracking({ message, commenterName, trackedLinks, recipientToken }) ||
     bodyText;
   const extraUrls = trackedLinks
     .slice(1)
-    .map((link) => buildTrackedUrl(link.slug));
-  return extraUrls.length > 0 ? `${base}\n${extraUrls.join("\n")}` : base;
+    .map((link) => buildTrackedUrl(link.slug, undefined, recipientToken));
+  const result = extraUrls.length > 0 ? `${base}\n${extraUrls.join("\n")}` : base;
+  return recipientToken && result.length > RECIPIENT_TEXT_BUDGET
+    ? buildInlineLinkFallback(message, commenterName, trackedLinks, bodyText)
+    : result;
 }
 
 type RevealAutomation = {
+  id: string;
   dmMessage: string;
   linkButtonLabel: string | null;
   trackedLinks: WorkerTrackedLink[];
@@ -205,6 +213,7 @@ async function sendRevealDirectMessage({
   commenterName: string | null;
   context: string;
 }): Promise<void> {
+  const recipientToken = createRecipientToken(userId, automation.id);
   if (automation.trackedLinks.length === 0) {
     await sendDirectMessage({
       context: accessToken,
@@ -227,7 +236,8 @@ async function sendRevealDirectMessage({
     }) || "Here's your link:";
   const buttons = buildLinkButtons(
     automation.trackedLinks,
-    automation.linkButtonLabel
+    automation.linkButtonLabel,
+    recipientToken
   );
 
   try {
@@ -256,7 +266,8 @@ async function sendRevealDirectMessage({
           automation.dmMessage,
           commenterName,
           automation.trackedLinks,
-          bodyText
+          bodyText,
+          recipientToken
         ),
       });
     } catch (fallbackError) {
@@ -673,6 +684,7 @@ async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
     }
     let delivered = false;
     try {
+      const recipientToken = createRecipientToken(commenterId, automation.id);
       if (useOpeningDm) {
         const openingText = renderMessageWithTracking({
           message: automation.openingDmMessage as string,
@@ -715,7 +727,8 @@ async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
           }) || "Here's your link:";
         const buttons = buildLinkButtons(
           automation.trackedLinks,
-          automation.linkButtonLabel
+          automation.linkButtonLabel,
+          recipientToken
         );
 
         try {
@@ -741,7 +754,8 @@ async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
             automation.dmMessage,
             commenterName,
             automation.trackedLinks,
-            bodyText
+            bodyText,
+            recipientToken
           );
           try {
             await sendPrivateReply({
@@ -760,6 +774,7 @@ async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
           message: automation.dmMessage,
           commenterName,
           trackedLinks: automation.trackedLinks,
+          recipientToken,
         });
         await sendPrivateReply({
           context: accessToken,

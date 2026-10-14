@@ -76,7 +76,7 @@ export default async function ReportPage({ params }: ReportPageProps) {
   );
 
   return (
-    <main className="min-h-screen bg-background text-foreground">
+    <main className="min-h-screen bg-zinc-950 text-zinc-100">
       <section className="border-b border-white/10 bg-zinc-950/70">
         <div className="mx-auto w-full max-w-6xl px-5 py-10 sm:px-6 lg:px-8">
           <div className="flex flex-col gap-6 md:flex-row md:items-start md:justify-between">
@@ -124,7 +124,7 @@ export default async function ReportPage({ params }: ReportPageProps) {
       </section>
 
       <section className="mx-auto w-full max-w-6xl px-5 py-10 sm:px-6 lg:px-8">
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
           <MetricCard
             label={t("DMs sent")}
             value={report.metrics.sent}
@@ -149,6 +149,11 @@ export default async function ReportPage({ params }: ReportPageProps) {
             label={t("Clicks / 100 sends")}
             value={`${report.metrics.ctr}`}
             helper={t("Clicks divided by sent replies.")}
+          />
+          <MetricCard
+            label={t("Deduplicated clicks")}
+            value={report.metrics.deduplicatedClicks}
+            helper={t("Recipient tokens or IP fallback; not verified people or conversions.")}
           />
         </div>
 

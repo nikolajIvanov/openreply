@@ -227,6 +227,49 @@ No new paid AI provider, autonomous public replies, TikTok integration, A/B spli
 or no-click reminders are enabled here. Those require confirmed access and
 recipient-level signals first. Existing reminders are time-based only.
 
+### Recipient click attribution (separate tracking update)
+
+- Apply the additive `20261014090000_link_click_recipient` migration before
+  starting this web source. It adds nullable `LinkClick.recipientHash`, without
+  changing old rows or removing raw clicks. Existing indexes remain unchanged.
+- Web and worker must share a strong `NEXTAUTH_SECRET`. DM link buttons and
+  their explicit template-rejection fallback carry a campaign-bound, signed
+  `?r=v1.…` attribution token. The token contains a keyed pseudonym, never the
+  Instagram ID. Missing/short secrets disable recipient attribution; no public
+  fallback key is used, and ordinary tokenless links continue to work.
+- The redirect verifies the signature against the link's campaign, records only
+  the verified pseudonym, and sets no-store/no-referrer headers. Bad or foreign
+  tokens still redirect to the original destination and count as ordinary clicks.
+  Do not use this token as login authentication or as evidence of a conversion.
+  Secret rotation invalidates old attribution signatures, not the destination.
+- Deduplicated clicks use verified recipient pseudonyms, otherwise IP hashes,
+  otherwise individual rows; counts are scoped per campaign. Shared IPs can
+  merge different people; mixed legacy/token links can count one person twice.
+  Forwarding and link-preview bots remain indistinguishable from human clicks.
+- Dashboard, campaign listing and shared report show an additional deduplicated
+  metric. Existing raw-click fields, daily raw-click series, clicks-per-100-sends
+  ratios (including values above 100), and API/MCP `rawClicks` keep their meaning.
+  Aggregation runs in PostgreSQL with bound workspace/account/campaign/time
+  filters instead of loading all click rows into application memory. Large
+  histories still require a database scan and should be profiled before rollout.
+- Newly scheduled follow-ups only add tokens to already explicit own-origin
+  `/r/<slug>` links listed in the campaign. External URLs and `{link}` removal
+  retain their previous behavior. Previously queued immutable snapshots are
+  not rewritten; opt-in, delivery claims, retries and the 24-hour window are
+  unchanged. No new reminder is enabled by this update.
+- A v1 attribution query adds 51 characters to each inline URL. If adding it
+  makes an inline message, complete link fallback or new follow-up snapshot
+  exceed 1000 UTF-16 units, retain the previous URLs without adding attribution.
+  Existing query parameters on explicit follow-up links remain unchanged. This
+  conservative application budget is not a universal Meta transport limit;
+  it does not repair pre-existing oversized rendered text. Button-template
+  text still has the separately documented 640-unit sender cutoff. Never
+  silently truncate text, signed tokens or URLs to force a message to fit.
+- Before release: test fresh/legacy/replayed migration, repeated clicks and
+  bad signatures, campaign isolation, link buttons/fallbacks, follow-up snapshot
+  immutability, raw metrics and API/MCP draft editing. Use a disposable database;
+  tests must never trigger Meta sends or access production credentials.
+
 ### Verification
 
 Run `npm run db:generate`, `npm run typecheck`, `npm run build`, `npm test`.

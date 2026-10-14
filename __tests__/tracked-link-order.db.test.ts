@@ -218,7 +218,7 @@ describe.skipIf(!DATABASE_URL)("tracked link order on a real Postgres", () => {
       adapter: new PrismaPg(
         {
           connectionString: DATABASE_URL,
-          options: "-c enable_indexscan=off -c enable_bitmapscan=off",
+          options: `-c enable_indexscan=off -c enable_bitmapscan=off -c search_path=${schema}`,
         },
         { schema }
       ),
