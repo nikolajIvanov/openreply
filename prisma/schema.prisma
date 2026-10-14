@@ -389,6 +389,8 @@ model LinkClick {
   instagramAccountId String
   trackedLinkId      String
   ipHash             String?
+  // Verified campaign-scoped recipient pseudonym; never the Instagram ID.
+  recipientHash      String?
   userAgent          String?
   referrer           String?
   createdAt          DateTime @default(now())

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db/client";
-import { getRequestIp, hashClickIp } from "@/lib/tracking/server";
+import { getRequestIp, hashClickIp, parseRecipientToken } from "@/lib/tracking/server";
 
 type RedirectRouteProps = {
   params: Promise<{ slug: string }>;
@@ -34,10 +34,16 @@ export async function GET(request: NextRequest, { params }: RedirectRouteProps) 
       instagramAccountId: trackedLink.automation.instagramAccountId,
       trackedLinkId: trackedLink.id,
       ipHash: hashClickIp(getRequestIp(request)),
+      recipientHash: parseRecipientToken(new URL(request.url).searchParams.get("r"), trackedLink.automationId),
       userAgent: request.headers.get("user-agent"),
       referrer: request.headers.get("referer"),
     },
   });
 
-  return NextResponse.redirect(trackedLink.destinationUrl, { status: 302 });
+  // Recipient-specific redirects must not be cached or expose their query via
+  // a destination Referer. The destination URL itself is never personalized.
+  const response = NextResponse.redirect(trackedLink.destinationUrl, { status: 302 });
+  response.headers.set("Cache-Control", "no-store");
+  response.headers.set("Referrer-Policy", "no-referrer");
+  return response;
 }

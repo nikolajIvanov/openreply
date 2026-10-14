@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { getCurrentWorkspaceId } from "@/lib/auth";
 import { prisma } from "@/lib/db/client";
+import { getClickMetrics } from "@/lib/tracking/queries";
 import { calculateCtr, normalizeTopKeywords } from "@/lib/tracking/analytics";
 import { buildTrackedUrl } from "@/lib/tracking/message";
 import { TRACKED_LINK_ORDER } from "@/lib/tracking/link-order";
@@ -175,7 +176,7 @@ export async function GET(request: NextRequest) {
     })
   );
 
-  const [statusCounts, clickCounts, keywordCounts] = await Promise.all([
+  const [statusCounts, clickCounts, keywordCounts, deduplicatedCounts] = await Promise.all([
     prisma.dmLog.groupBy({
       by: ["automationId", "status"],
       where: { workspaceId },
@@ -191,6 +192,7 @@ export async function GET(request: NextRequest) {
       where: { workspaceId, matchedKeyword: { not: null } },
       _count: { _all: true },
     }),
+    getClickMetrics({ workspaceId }, "campaign"),
   ]);
 
   const analytics = new Map<
@@ -200,6 +202,7 @@ export async function GET(request: NextRequest) {
       skipped: number;
       failed: number;
       clicks: number;
+      deduplicatedClicks: number;
       topKeywords: { keyword: string; count: number }[];
     }
   >();
@@ -210,6 +213,7 @@ export async function GET(request: NextRequest) {
       skipped: 0,
       failed: 0,
       clicks: 0,
+      deduplicatedClicks: 0,
       topKeywords: [],
     });
   }
@@ -226,6 +230,10 @@ export async function GET(request: NextRequest) {
   for (const row of clickCounts) {
     const item = analytics.get(row.automationId);
     if (item) item.clicks = row._count._all;
+  }
+  for (const row of deduplicatedCounts) {
+    const item = analytics.get(row.key);
+    if (item) item.deduplicatedClicks = row.deduplicatedClicks;
   }
 
   for (const automation of automationsWithReports) {
@@ -251,6 +259,7 @@ export async function GET(request: NextRequest) {
         skipped: 0,
         failed: 0,
         clicks: 0,
+        deduplicatedClicks: 0,
         topKeywords: [],
       };
 

@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { mockPrisma } = vi.hoisted(() => ({
+const { mockPrisma, mockClickMetrics } = vi.hoisted(() => ({
+  mockClickMetrics: vi.fn(),
   mockPrisma: {
     automation: {
       findFirst: vi.fn(),
@@ -19,6 +20,7 @@ const { mockPrisma } = vi.hoisted(() => ({
 vi.mock("@/lib/db/client", () => ({
   prisma: mockPrisma,
 }));
+vi.mock("@/lib/tracking/queries", () => ({ getClickMetrics: mockClickMetrics }));
 
 import { getCampaignReportBySlug } from "../lib/reports/data";
 import { buildReportUrl, isReportBranded } from "../lib/reports/share";
@@ -52,6 +54,9 @@ const baseAutomation = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockClickMetrics.mockImplementation(async (_scope, group) => [
+    { key: group === "link" ? "link_123" : "all", rawClicks: 12, deduplicatedClicks: 3 },
+  ]);
   mockPrisma.automation.findFirst.mockResolvedValue(baseAutomation);
   mockPrisma.dmLog.groupBy
     .mockResolvedValueOnce([
@@ -88,6 +93,7 @@ describe("campaign reports", () => {
         skipped: 2,
         failed: 1,
         clicks: 12,
+        deduplicatedClicks: 3,
         ctr: 60,
       },
       topKeywords: [
@@ -98,11 +104,14 @@ describe("campaign reports", () => {
         {
           destinationHost: "example.com",
           clicks: 12,
+          deduplicatedClicks: 3,
         },
       ],
     });
     expect(report?.daily).toHaveLength(7);
     expect("dmMessage" in (report?.campaign ?? {})).toBe(false);
+    expect(mockClickMetrics).toHaveBeenCalledWith({ workspaceId: "workspace_123", automationId: "automation_123" });
+    expect(mockClickMetrics).toHaveBeenCalledWith({ workspaceId: "workspace_123", automationId: "automation_123" }, "link");
   });
 
   it("returns null when a report slug is missing or disabled", async () => {

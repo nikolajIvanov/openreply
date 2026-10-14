@@ -25,6 +25,7 @@ interface DashboardStats {
   totalDMs: number;
   clicksThisMonth: number;
   totalClicks: number;
+  deduplicatedClicksThisMonth: number;
   ctrThisMonth: number;
   instagramAccounts: AccountOption[];
   selectedInstagramAccountId: string | null;
@@ -128,6 +129,9 @@ export default function DashboardPage() {
       </div>
 
       {/* Chart + Recent Activity */}
+      <p className="text-xs text-muted">
+        {t("Deduplicated clicks")}: {stats?.deduplicatedClicksThisMonth ?? 0}. {t("Recipient tokens or IP fallback; not verified people or conversions.")}
+      </p>
       <div className="grid grid-cols-1 lg:grid-cols-6 gap-4 sm:gap-6">
         {/* 7-Day Chart */}
         <div className="lg:col-span-3 panel rounded p-4 sm:p-6">
