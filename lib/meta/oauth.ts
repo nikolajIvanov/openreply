@@ -48,7 +48,9 @@ export function createOAuthState(workspaceId: string): string {
 export function verifyOAuthState(state: string | null): OAuthStatePayload | null {
   if (!state) return null;
 
-  const [payload, signature] = state.split(".");
+  const parts = state.split(".");
+  if (parts.length !== 2) return null;
+  const [payload, signature] = parts;
   if (!payload || !signature) return null;
 
   const expected = signState(payload);
@@ -63,12 +65,21 @@ export function verifyOAuthState(state: string | null): OAuthStatePayload | null
   }
 
   try {
-    const parsed = JSON.parse(base64UrlDecode(payload)) as OAuthStatePayload;
-    if (!parsed.workspaceId || Date.now() - parsed.ts > STATE_MAX_AGE_MS) {
+    const parsed: unknown = JSON.parse(base64UrlDecode(payload));
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed) ||
+      !("workspaceId" in parsed) || typeof parsed.workspaceId !== "string" ||
+      !parsed.workspaceId.trim() || !("ts" in parsed) ||
+      typeof parsed.ts !== "number" || !Number.isFinite(parsed.ts)) {
+      return null;
+    }
+    // A non-numeric timestamp gives NaN, which evades a loose age comparison.
+    // Signed future states must not extend the ten-minute validity window.
+    const age = Date.now() - parsed.ts;
+    if (age < 0 || age > STATE_MAX_AGE_MS) {
       return null;
     }
 
-    return parsed;
+    return { workspaceId: parsed.workspaceId, ts: parsed.ts };
   } catch {
     return null;
   }
